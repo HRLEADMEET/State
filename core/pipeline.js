@@ -10,6 +10,7 @@ import { forecast, clientText } from './forecast.js';
 import { vacancyCost } from './economics.js';
 import { fmtRub } from './util.js';
 import { plural } from './ru.js';
+import { packaging } from './packaging.js';
 
 const DAY = 86400000;
 const stageIndex = (id) => STAGES.findIndex(s => s.id === id);
@@ -260,6 +261,12 @@ export function registerPipeline(R, H) {
     const settings = await getSettings(ctx);
     const f = forecast({ n: Math.min(100000, Math.max(1, Number(body.n) || 100)), unit: body.unit === 'responses' ? 'responses' : 'leads', usdRate: settings.usdRate, upsellRub: Math.max(0, Number(body.upsellRub) || 0), checkOverride: Number(body.checkRub) > 0 ? Number(body.checkRub) : null });
     return { ...f, text: clientText(f, { niche: body.niche || 'вашей нише', usdRate: settings.usdRate }) };
+  });
+
+  // ---- упаковка профиля: резюме hh и Telegram ----
+  R('GET', '/packaging', null, async (ctx) => {
+    const settings = await getSettings(ctx);
+    return packaging({ me: settings.me, proofs: proofsFor(ctx, settings), offers: settings.offers });
   });
 
   // ---- лёгкие счётчики для меню ----

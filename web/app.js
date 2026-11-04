@@ -5,7 +5,7 @@ import { viewDashboard, viewSignals, viewLeads, viewLead } from './views-main.js
 import { viewMeetings, viewScript, viewCalls, viewExperiments, viewAnalytics } from './views-sales.js';
 import { viewChannels, viewCabinets, viewInvestors, viewSecurity, viewPrefs, viewMemo, catSvg, fraudMemoHtml } from './views-admin.js';
 import { startTour } from './tour.js';
-import { viewQueue, viewForecast, viewLaunch } from './views-flow.js';
+import { viewQueue, viewForecast, viewLaunch, viewPack } from './views-flow.js';
 
 const NAV = [
   { id: 'dashboard', name: 'Пульт', icon: 'home' },
@@ -19,6 +19,7 @@ const NAV = [
   { id: 'forecast', name: 'Что даст 100', icon: 'spark' },
   { sep: 'Система' },
   { id: 'launch', name: 'Мастер запуска', icon: 'check' },
+  { id: 'pack', name: 'Упаковка профиля', icon: 'file' },
   { id: 'channels', name: 'Каналы', icon: 'plug' },
   { id: 'cabinets', name: 'Кабинеты и тарифы', icon: 'layers' },
   { id: 'investors', name: 'Инвесторам', icon: 'eye' },
@@ -26,7 +27,7 @@ const NAV = [
   { id: 'prefs', name: 'Настройки', icon: 'sliders' },
   { id: 'memo', name: 'Памятка с котиком', icon: 'cat' },
 ];
-const VIEWS = { queue: viewQueue, forecast: viewForecast, launch: viewLaunch, dashboard: viewDashboard, signals: viewSignals, leads: viewLeads, lead: viewLead, meetings: viewMeetings, script: viewScript, calls: viewCalls, experiments: viewExperiments, analytics: viewAnalytics, channels: viewChannels, cabinets: viewCabinets, investors: viewInvestors, security: viewSecurity, prefs: viewPrefs, memo: viewMemo };
+const VIEWS = { queue: viewQueue, forecast: viewForecast, launch: viewLaunch, pack: viewPack, dashboard: viewDashboard, signals: viewSignals, leads: viewLeads, lead: viewLead, meetings: viewMeetings, script: viewScript, calls: viewCalls, experiments: viewExperiments, analytics: viewAnalytics, channels: viewChannels, cabinets: viewCabinets, investors: viewInvestors, security: viewSecurity, prefs: viewPrefs, memo: viewMemo };
 const OBSERVER_VIEWS = ['investors', 'analytics', 'memo', 'forecast'];
 
 export async function boot(api) {

@@ -211,3 +211,23 @@ export function bindAutopilot(root) {
     if (r) { toast(r.summary.split('\n')[0]); S.render(); }
   }));
 }
+
+// ====================== УПАКОВКА ПРОФИЛЯ ======================
+export async function viewPack(el) {
+  const p = await call('GET', '/packaging');
+  const block = (title, text, tip = '') => `<div class="stage"><div class="row between"><b>${esc(title)}</b><button class="btn sm" data-copy-text="${esc(text)}">${icon('copy')}Копировать</button></div><div class="msg">${esc(text)}</div>${tip ? `<p class="xs mute">${esc(tip)}</p>` : ''}</div>`;
+  const r = p.resume, t = p.telegram;
+  el.innerHTML = `<div class="page-head"><div><h1>Упаковка профиля</h1><p>Резюме на hh.ru работает как лендинг: собственник видит цифры и сам зовёт на встречу. Профиль в Telegram — продолжение того же предложения. Тексты собраны только из ваших кейсов и офферов (Мастер запуска → Кейсы).</p></div></div>
+    <div class="grid g2">
+      <div class="card" data-tour="pack-hh"><h3>Резюме hh.ru — лид-магнит</h3>
+        ${block('Должность', r.title)}${block('Зарплата', r.salary, 'Вилка от 250 000 ₽ отсекает тех, кому не нужен результат.')}
+        ${block('О себе (шапка)', r.about)}${block('Кейсы: было → стало → результат', r.cases.join('\n') || 'Добавьте кейсы в Мастере запуска.')}
+        ${block('Что я сделаю в первую неделю', r.firstWeek.join('\n'))}
+        <ul class="facts">${r.tips.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
+      <div class="card" data-tour="pack-tg"><h3>Рабочий Telegram</h3>
+        ${block('Имя профиля', t.name)}${block('Био (до 70 символов)', t.bio, `${t.bio.length} символов`)}
+        ${block('Закреплённый пост / первое сообщение в канале', t.pinned)}
+        <p class="small mute">Подключение аккаунта по QR не нужно: отправка идёт с вашего телефона через Конвейер — так аккаунт не банят.</p></div>
+    </div>`;
+  el.querySelectorAll('[data-copy-text]').forEach(b => b.addEventListener('click', () => copy(b.dataset.copyText)));
+}

@@ -63,3 +63,24 @@ export const OAUTH = {
 export function oauthEnabled() {
   return Object.fromEntries(Object.entries(config.oauth).map(([k, v]) => [k, !!(v.id && v.secret)]));
 }
+
+// ---------- mymeet.ai (запись и расшифровка встреч Zoom / Телемост / МТС Линк) ----------
+// REST API с ключом в заголовке X-API-KEY (mymeet.ai → Настройки → API). Формат выгрузки задаётся MYMEET_FORMAT (по умолчанию txt).
+export function mymeetService(getChannelConfig) {
+  const BASE = (process.env.MYMEET_API_BASE || 'https://backend.mymeet.ai').replace(/\/$/, '');
+  async function key(ctx) { const c = await getChannelConfig(ctx, 'recorder'); return c?.provider === 'mymeet' && c?.key ? c.key : (process.env.MYMEET_API_KEY || ''); }
+  async function req(ctx, method, path, body) {
+    const k = await key(ctx);
+    if (!k) throw new Error('mymeet.ai не подключён: «Каналы → Записи звонков», провайдер mymeet и API-ключ.');
+    const res = await fetch(BASE + path, { method, headers: { 'X-API-KEY': k, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) });
+    if (!res.ok) throw new Error('mymeet.ai: HTTP ' + res.status);
+    const ct = res.headers.get('content-type') || '';
+    return ct.includes('json') ? res.json() : res.text();
+  }
+  return {
+    available: async (ctx) => !!(await key(ctx)),
+    record: (ctx, { link, title }) => req(ctx, 'POST', '/api/record-meeting', { link, title, template: 'summary' }),
+    meetings: (ctx) => req(ctx, 'GET', '/api/workspaces/active/all-meetings?page=1&per_page=20'),
+    transcript: (ctx, meetingId) => req(ctx, 'GET', '/api/storage/download?meeting_id=' + encodeURIComponent(meetingId) + '&format=' + encodeURIComponent(process.env.MYMEET_FORMAT || 'txt')),
+  };
+}

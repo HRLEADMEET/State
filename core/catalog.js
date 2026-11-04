@@ -74,7 +74,7 @@ export const CHANNELS = [
   { type: 'instagram', name: 'Instagram / Facebook Lead Ads', dir: 'in', mode: 'webhook', fields: [{ k: 'verify', label: 'Verify token', secret: true }], doc: 'Meta Lead Ads → вебхук.' },
   { type: 'tg_chats', name: 'Чаты руководителей (Telegram/VK)', dir: 'in', mode: 'manual', fields: [{ k: 'list', label: 'Список чатов (по строке)' }], doc: 'Источник: чаты собственников, коучей, психологов, стоматологов, IT. Ручная работа с сигналами.' },
   { type: 'site_form', name: 'Любой сайт (виджет-форма)', dir: 'in', mode: 'webhook', fields: [], doc: 'Вставьте сниппет — заявки с любого сайта падают в систему с utm.' },
-  { type: 'recorder', name: 'Записи звонков (Zoom, Телемост, МТС Линк, диктофон)', dir: 'in', mode: 'webhook', fields: [{ k: 'provider', label: 'Сервис транскрибации (openai/deepgram)' }, { k: 'key', label: 'API-ключ транскрибации', secret: true }], doc: 'Загрузка аудио/текста или вебхук готовой расшифровки.' },
+  { type: 'recorder', name: 'Записи звонков (mymeet.ai, Zoom, Телемост, МТС Линк, диктофон)', dir: 'in', mode: 'webhook', fields: [{ k: 'provider', label: 'Сервис: mymeet / openai / deepgram' }, { k: 'key', label: 'API-ключ сервиса', secret: true }], doc: 'mymeet.ai: бот записывает встречу по ссылке, расшифровка уходит на разбор. Также — загрузка аудио или текста и вебхук готовой расшифровки.' },
   { type: 'llm', name: 'ИИ (Claude)', dir: 'none', mode: 'api', fields: [{ k: 'apiKey', label: 'ANTHROPIC_API_KEY', secret: true }], doc: 'Глубокая персонализация писем и разбор звонков. Без ключа работает шаблонный движок.' },
 ];
 

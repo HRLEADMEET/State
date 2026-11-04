@@ -12,7 +12,7 @@ import { webService } from './services/web.js';
 import { llmService } from './services/llm.js';
 import { dadataService } from './services/dadata.js';
 import { sendMail } from './services/smtp.js';
-import { telegramSend, transcribe, usdRate, OAUTH, oauthEnabled } from './services/misc.js';
+import { telegramSend, transcribe, usdRate, OAUTH, oauthEnabled, mymeetService } from './services/misc.js';
 import { handle, inboundLead, getSettings, sendQuota, pipeline } from '../core/router.js';
 import { seedDemo, mockServices } from '../core/seed.js';
 import { HttpError, nowIso, uid } from '../core/util.js';
@@ -39,6 +39,7 @@ async function channelConfig(ctx, type) {
 const hh = hhService(channelConfig);
 const llm = llmService(channelConfig);
 const dadata = dadataService(channelConfig);
+const mymeet = mymeetService(channelConfig);
 
 function unsubscribeToken(ws, leadId) {
   const payload = Buffer.from(`${ws}.${leadId}`).toString('base64url');
@@ -56,7 +57,7 @@ function services(ctx) {
 
 function realServices(ctx) {
   return {
-    hh, web: webService, llm, dadata,
+    hh, web: webService, llm, dadata, mymeet,
     secrets: { seal: async (v) => seal(v) },
     mail: {
       async send(ctx, m) {

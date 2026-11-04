@@ -9,13 +9,15 @@ export async function viewMeetings(el) {
   const ms = await call('GET', '/meetings');
   const up = ms.filter(m => m.status === 'scheduled'), past = ms.filter(m => m.status !== 'scheduled');
   const row = (m) => `<div class="item"><span class="ico">${icon('calendar')}</span><div class="body"><div class="title">${fmtDate(m.at)} · ${esc(m.lead?.owner || '')} ${m.lead?.company ? '(' + esc(m.lead.company) + ')' : ''}</div><div class="small mute">${m.status === 'done' ? 'проведена' : m.status === 'noshow' ? 'не пришёл' : 'назначена'}${safeUrl(m.link) ? ' · <a href="' + esc(safeUrl(m.link)) + '" target="_blank" rel="noopener">ссылка на звонок</a>' : ''}</div></div>
-    <div class="row"><a class="btn sm primary" href="${scriptHash(m.leadId)}">Скрипт</a><button class="btn sm" data-up="${m.id}" data-lead="${m.leadId}">Загрузить запись</button>${m.status === 'scheduled' ? `<button class="btn sm ghost" data-noshow="${m.id}">Не пришёл</button>` : ''}<a class="btn sm ghost" href="${leadHash(m.leadId)}">Лид</a></div></div>`;
+    <div class="row"><a class="btn sm primary" href="${scriptHash(m.leadId)}">Скрипт</a><button class="btn sm" data-up="${m.id}" data-lead="${m.leadId}">Загрузить запись</button>${m.link && m.status === 'scheduled' && !m.mymeetId ? `<button class="btn sm" data-rec="${m.id}" title="Бот mymeet.ai подключится к звонку и запишет его">Записать (mymeet)</button>` : ''}${m.mymeetId && !m.callId ? `<button class="btn sm" data-fetch="${m.id}">Забрать расшифровку</button>` : ''}${m.status === 'scheduled' ? `<button class="btn sm ghost" data-noshow="${m.id}">Не пришёл</button>` : ''}<a class="btn sm ghost" href="${leadHash(m.leadId)}">Лид</a></div></div>`;
   el.innerHTML = `<div class="page-head"><div><h1>Встречи</h1><p>Перед каждой встречей — персональный скрипт продающего интервью; после — запись звонка на разбор.</p></div></div>
     <div class="card" data-tour="meetings-list"><h3>Предстоящие</h3><div class="list">${up.map(row).join('') || '<div class="empty">Встреч нет. Назначьте встречу из карточки лида, когда собственник ответит.</div>'}</div></div>
     <div class="card"><h3>Прошедшие</h3><div class="list">${past.map(row).join('') || '<p class="mute small">Пока нет.</p>'}</div></div>`;
   el.addEventListener('click', async (e) => {
     const u = e.target.closest('[data-up]'); if (u) return uploadCallModal({ leadId: u.dataset.lead, meetingId: u.dataset.up });
     const n = e.target.closest('[data-noshow]'); if (n) { await act(() => call('PUT', '/meetings/' + n.dataset.noshow, { status: 'noshow' }), 'Отмечено'); S.render(); }
+    const rec = e.target.closest('[data-rec]'); if (rec) { const r = await act(() => call('POST', `/meetings/${rec.dataset.rec}/record`), 'Бот mymeet.ai записывает встречу'); if (r) S.render(); }
+    const fe = e.target.closest('[data-fetch]'); if (fe) { const r = await act(() => call('POST', `/meetings/${fe.dataset.fetch}/fetch-transcript`)); if (r) { toast(`Разбор готов: оценка ${r.analysis?.score}`); location.hash = '#calls'; } }
   });
 }
 

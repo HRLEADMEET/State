@@ -558,6 +558,25 @@ R('POST', '/calls', 'calls', async (ctx, { body }) => {
   return call;
 });
 
+// mymeet.ai: отправить бота записи на встречу и забрать готовую расшифровку на разбор.
+R('POST', '/meetings/:id/record', 'meetings', async (ctx, { params }) => {
+  const mt = await get(ctx, 'meetings', params.id);
+  need(mt.link, 400, 'У встречи нет ссылки на звонок.');
+  need(ctx.services?.mymeet, 400, 'Запись встреч подключается через mymeet.ai в «Каналы → Записи звонков».');
+  const lead = await get(ctx, 'leads', mt.leadId);
+  const r = await ctx.services.mymeet.record(ctx, { link: mt.link, title: `Встреча: ${lead.company}` });
+  mt.mymeetId = r?.id || r?.meeting_id || r?.data?.id || null; mt.recording = true;
+  await put(ctx, 'meetings', mt);
+  return { ok: true, mymeetId: mt.mymeetId };
+});
+R('POST', '/meetings/:id/fetch-transcript', 'calls', async (ctx, { params }) => {
+  const mt = await get(ctx, 'meetings', params.id);
+  need(mt.mymeetId && ctx.services?.mymeet, 400, 'Для этой встречи нет записи mymeet.ai.');
+  const text = await ctx.services.mymeet.transcript(ctx, mt.mymeetId);
+  need(typeof text === 'string' && text.length > 30, 409, 'Расшифровка ещё не готова — попробуйте позже.');
+  return handle(ctx, 'POST', '/calls', { transcript: text, leadId: mt.leadId, meetingId: mt.id, title: 'Запись mymeet.ai', source: 'mymeet' });
+});
+
 R('GET', '/calls', 'calls:read', async (ctx) => (await list(ctx, 'calls')).map(c => ({ ...c, transcript: undefined, transcriptChars: c.transcript?.length || 0 })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
 R('GET', '/calls/learn', 'calls:read', async (ctx) => learnFromCalls((await list(ctx, 'calls')).map(c => c.analysis)));
 R('GET', '/calls/:id', 'calls:read', async (ctx, { params }) => get(ctx, 'calls', params.id));

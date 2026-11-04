@@ -190,3 +190,20 @@ export function startTips(el, tips) {
   el.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === 'Enter') show(i + 1); if (e.key === 'ArrowLeft') show(i - 1); });
   show(i);
 }
+
+/** Площадки на экране входа: подсветка по наведению/касанию и автопрокрутка с подписью «что даёт». */
+export function startPlatforms(box) {
+  if (!box) return;
+  const ul = box.querySelector('ul'), cap = box.querySelector('.stack-cap'), bs = [...box.querySelectorAll('.pf')];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let k = -1, paused = false, pauseT = 0;
+  const show = (b, user) => {
+    bs.forEach(x => x !== b && x.classList.remove('on')); b.classList.add('on'); ul.classList.add('lit');
+    cap.classList.add('fade');
+    setTimeout(() => { const n = document.createElement('b'); n.textContent = b.lastChild.textContent.trim() + ': '; const t = b.dataset.d; cap.replaceChildren(n, document.createTextNode(t.charAt(0).toLowerCase() + t.slice(1))); cap.classList.remove('fade'); }, reduce ? 0 : 180);
+    if (user) { paused = true; clearTimeout(pauseT); pauseT = setTimeout(() => { paused = false; }, 6000); }
+  };
+  for (const ev of ['mouseover', 'focusin', 'click']) box.addEventListener(ev, (e) => { const b = e.target.closest('.pf'); if (b) show(b, true); });
+  if (reduce) return;
+  const iv = setInterval(() => { if (!box.isConnected) return clearInterval(iv); if (paused || document.hidden) return; k = (k + 1) % bs.length; show(bs[k], false); }, 2600);
+}

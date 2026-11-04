@@ -190,7 +190,7 @@ export async function viewLeads(el) {
     <div class="stage-strip" id="stage-strip" data-tour="stage-strip">
       ${stages.map(s => `<button data-st="${s.id}" class="st-${s.id}"><span class="pill st-${s.id}" style="border:0;background:none;padding:0">${esc(s.name)}</span><b>${stats.byStage[s.id] || 0}</b></button>`).join('')}
     </div>
-    <div class="table-wrap"><table><thead><tr><th>Компания</th><th>Собственник</th><th>Сигнал</th><th class="n">Оценка</th><th>Этап</th><th>Источник</th></tr></thead><tbody id="lead-rows"></tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Компания</th><th>Собственник</th><th>Откуда лид</th><th class="n">Оценка</th><th>Этап</th><th>Источник</th></tr></thead><tbody id="lead-rows"></tbody></table></div>
     <p class="xs mute" id="lead-more"></p>`;
   let seq = 0;
   const draw = async () => {
@@ -234,7 +234,7 @@ export async function viewLead(el, id) {
       <div class="stack">
         <div class="card" data-tour="profile"><div class="card-head"><h3>Профиль</h3><button class="btn sm ghost" id="btn-edit">Изменить</button></div>
           <div class="small stack" style="gap:6px">
-            ${lead.vacancy?.title ? `<div><span class="label">Сигнал</span><br>${safeUrl(lead.vacancy.url) ? `<a href="${esc(safeUrl(lead.vacancy.url))}" target="_blank" rel="noopener">${esc(lead.vacancy.title)}</a>` : esc(lead.vacancy.title)}${lead.vacancy.salaryRub ? ' · до ' + money(lead.vacancy.salaryRub) : ''}</div>` : ''}
+            ${lead.vacancy?.title ? `<div><span class="label">Откуда лид</span><br>${safeUrl(lead.vacancy.url) ? `<a href="${esc(safeUrl(lead.vacancy.url))}" target="_blank" rel="noopener">${esc(lead.vacancy.title)}</a>` : esc(lead.vacancy.title)}${lead.vacancy.salaryRub ? ' · до ' + money(lead.vacancy.salaryRub) : ''}</div>` : ''}
             ${safeUrl(lead.site) ? `<div><span class="label">Сайт</span><br><a href="${esc(safeUrl(lead.site))}" target="_blank" rel="noopener">${esc(lead.site)}</a></div>` : ''}
             <div><span class="label">Контакты</span><br>${[lead.contacts?.ownerEmail, ...(lead.contacts?.emails || []), ...(lead.contacts?.phones || [])].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).map(esc).join(' · ') || '<span class="mute">нет — добавьте или запустите исследование</span>'}</div>
             ${social.length ? `<div><span class="label">Соцсети</span><br>${social.map(([k, v]) => `<span class="tag">${esc(k)}: ${esc(String(v).replace(/^https?:\/\//, ''))}</span>`).join(' ')}</div>` : ''}

@@ -290,7 +290,10 @@ R('POST', '/messages/:id/send', 'messages', async (ctx, { params, body }) => {
     need(msg.to, 400, 'Нет email получателя. Добавьте его в карточку лида.');
     if (!ctx.services?.mail) throw new HttpError(400, 'Почта не подключена. Раздел «Каналы» → Почта (SMTP).');
     const quota = await sendQuota(ctx, settings);
-    if (quota.left <= 0) { msg.status = 'queued'; await put(ctx, 'messages', msg); return { ok: true, queued: true, msg, quota, note: 'Дневной лимит исчерпан — письмо уйдёт завтра в рабочее окно.' }; }
+    if (!body.now || quota.left <= 0) {
+      msg.status = 'queued'; msg.queuedAt = nowIso(); await put(ctx, 'messages', msg);
+      return { ok: true, queued: true, msg, quota, note: quota.left <= 0 ? 'Дневной лимит прогрева исчерпан — письмо уйдёт в следующее рабочее окно.' : `В очереди: уйдёт в рабочее окно ${settings.sending.windowFrom}:00–${settings.sending.windowTo}:00 с паузой между письмами.` };
+    }
     const res = await ctx.services.mail.send(ctx, { to: msg.to, subject: msg.subject, text: msg.body, leadId: lead.id, msgId: msg.id });
     msg.status = 'sent'; msg.sentAt = nowIso(); msg.providerId = res?.messageId || null;
   } else {

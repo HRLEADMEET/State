@@ -65,7 +65,7 @@ export async function seedDemo(ctx) {
   // 4) Первое касание Дмитрию: вариант B, письмо
   const d = await api('POST', `/leads/${dmitry.id}/draft`, { experimentId: exp.id, variantId: 'B', channel: 'email', useLlm: false });
   const msg = await api('POST', `/leads/${dmitry.id}/messages`, { ...d, status: 'approved' });
-  await api('POST', `/messages/${msg.id}/send`, {});
+  await api('POST', `/messages/${msg.id}/send`, { now: true });
   // 5) Ответ → классификация → встреча
   await api('POST', `/leads/${dmitry.id}/reply`, { text: MOCK_REPLY_DMITRY });
   const mt = await api('POST', `/leads/${dmitry.id}/meeting`, { at: nextThursday11(), link: 'https://telemost.yandex.ru/' });
@@ -77,7 +77,7 @@ export async function seedDemo(ctx) {
   // 7) КодЛаб — письмо в Telegram, ждём ответа
   const d2 = await api('POST', `/leads/${codelab.id}/draft`, { experimentId: exp.id, variantId: 'C', channel: 'telegram', useLlm: false });
   const m2 = await api('POST', `/leads/${codelab.id}/messages`, { ...d2, status: 'approved' });
-  await api('POST', `/messages/${m2.id}/send`, {});
+  await api('POST', `/messages/${m2.id}/send`, { now: true });
 
   // 8) Входящая заявка с сайта (виджет)
   const { inboundLead } = await import('./router.js');

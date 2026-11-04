@@ -10,9 +10,10 @@ import { backupNow, listBackups } from './backup.js';
 import { hhService } from './services/hh.js';
 import { webService } from './services/web.js';
 import { llmService } from './services/llm.js';
+import { dadataService } from './services/dadata.js';
 import { sendMail } from './services/smtp.js';
 import { telegramSend, transcribe, usdRate, OAUTH, oauthEnabled } from './services/misc.js';
-import { handle, inboundLead, getSettings, sendQuota } from '../core/router.js';
+import { handle, inboundLead, getSettings, sendQuota, pipeline } from '../core/router.js';
 import { seedDemo, mockServices } from '../core/seed.js';
 import { HttpError, nowIso, uid } from '../core/util.js';
 import { PLANS } from '../core/catalog.js';
@@ -21,6 +22,8 @@ const db = openDb();
 const store = new SqliteStore(db);
 const WEB = path.join(ROOT, 'web');
 const loginLimiter = new RateLimiter(10, 15 * 60_000);
+const loginEmailLimiter = new RateLimiter(20, 60 * 60_000);
+const DUMMY_HASH = hashPassword('dummy-password-for-timing');
 const apiLimiter = new RateLimiter(600, 60_000);
 const hookLimiter = new RateLimiter(60, 60_000);
 
@@ -35,6 +38,7 @@ async function channelConfig(ctx, type) {
 
 const hh = hhService(channelConfig);
 const llm = llmService(channelConfig);
+const dadata = dadataService(channelConfig);
 
 function unsubscribeToken(ws, leadId) {
   const payload = Buffer.from(`${ws}.${leadId}`).toString('base64url');
@@ -52,7 +56,7 @@ function services(ctx) {
 
 function realServices(ctx) {
   return {
-    hh, web: webService, llm,
+    hh, web: webService, llm, dadata,
     secrets: { seal: async (v) => seal(v) },
     mail: {
       async send(ctx, m) {
@@ -94,6 +98,9 @@ function makeCtx(sess, user, role) {
 // ---------- http helpers ----------
 const SEC_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  ...(config.secureCookies ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' } : {}),
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
@@ -129,7 +136,8 @@ function cookies(req) {
 function setCookie(name, value, { maxAge, httpOnly = true } = {}) {
   return `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax${httpOnly ? '; HttpOnly' : ''}${config.secureCookies ? '; Secure' : ''}${maxAge !== undefined ? '; Max-Age=' + maxAge : ''}`;
 }
-const ip = (req) => (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
+// X-Forwarded-For учитываем только за доверенным прокси (TRUST_PROXY=true), иначе его можно подделать и обойти лимиты.
+const ip = (req) => (config.trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() : '') || req.socket.remoteAddress || '';
 
 function startSession(res, req, user, wsId) {
   const raw = token(32); const csrf = token(18);
@@ -167,7 +175,8 @@ async function authRoute(req, res, sub) {
   if (m === 'POST' && (sub === 'login' || sub === 'register' || sub === 'demo')) {
     if (!loginLimiter.hit(ip(req))) throw new HttpError(429, 'Слишком много попыток. Подождите 15 минут.');
   }
-  const body = m === 'POST' ? await readJson(req) : {};
+  const body = m === 'POST' ? await readJson(req, 64_000) : {};
+  if (m === 'POST' && sub === 'login' && !loginEmailLimiter.hit('e:' + String(body.email || '').toLowerCase().slice(0, 120))) throw new HttpError(429, 'Слишком много попыток для этого email. Подождите час.');
   if (m === 'POST' && sub === 'register') {
     const email = String(body.email || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'Укажите корректный email.');
@@ -190,7 +199,9 @@ async function authRoute(req, res, sub) {
   }
   if (m === 'POST' && sub === 'login') {
     const user = store.userByEmail(String(body.email || '').trim());
-    if (!user || !user.pass || !verifyPassword(body.password || '', user.pass)) { store.audit({ action: 'auth.fail', data: { email: String(body.email || '').slice(0, 80), ip: ip(req) } }); throw new HttpError(401, 'Неверный email или пароль.'); }
+    // Одинаковое время ответа для существующих и несуществующих email — нельзя перебором узнать, кто зарегистрирован.
+    const passOk = verifyPassword(body.password || '', user?.pass || DUMMY_HASH);
+    if (!user || !user.pass || !passOk) { store.audit({ action: 'auth.fail', data: { email: String(body.email || '').slice(0, 80), ip: ip(req) } }); throw new HttpError(401, 'Неверный email или пароль.'); }
     if (user.totpEnabled) {
       if (!body.totp) return send(res, 200, { needTotp: true });
       if (!verifyTotp(unseal(user.totpSecret), body.totp)) throw new HttpError(401, 'Неверный код из приложения-аутентификатора.');
@@ -251,6 +262,12 @@ async function authRoute(req, res, sub) {
 }
 
 const oauthStates = new Map();
+function rememberOauthState(state, v) {
+  const now = Date.now();
+  for (const [k, x] of oauthStates) if (now - x.at > 10 * 60_000) oauthStates.delete(k);
+  if (oauthStates.size > 5000) oauthStates.delete(oauthStates.keys().next().value);
+  oauthStates.set(state, v);
+}
 async function oauthRoute(req, res, provider, isCallback) {
   const cfg = config.oauth[provider]; const p = OAUTH[provider];
   if (!cfg?.id || !cfg?.secret) throw new HttpError(400, `Вход через ${provider} не настроен: добавьте ${provider.toUpperCase()}_CLIENT_ID и ${provider.toUpperCase()}_CLIENT_SECRET в .env.`);
@@ -258,7 +275,7 @@ async function oauthRoute(req, res, provider, isCallback) {
   const url = new URL(req.url, config.baseUrl);
   if (!isCallback) {
     const state = token(16); const verifier = token(32);
-    oauthStates.set(state, { verifier, at: Date.now() });
+    rememberOauthState(state, { verifier, at: Date.now() });
     const q = new URLSearchParams({ client_id: cfg.id, redirect_uri: redirect, response_type: 'code', scope: p.scope, state });
     if (p.pkce) { q.set('code_challenge', crypto.createHash('sha256').update(verifier).digest('base64url')); q.set('code_challenge_method', 'S256'); }
     res.writeHead(302, { Location: p.auth + '?' + q }); return res.end();
@@ -285,8 +302,9 @@ async function oauthRoute(req, res, provider, isCallback) {
 }
 
 // ---------- webhooks (public, by key) ----------
+const hookKeyLimiter = new RateLimiter(300, 60_000);
 async function hookRoute(req, res, rest, url) {
-  if (!hookLimiter.hit(ip(req))) throw new HttpError(429, 'Слишком часто');
+  if (!hookLimiter.hit(ip(req)) || !hookKeyLimiter.hit('k:' + (url.searchParams.get('key') || '').slice(0, 40))) throw new HttpError(429, 'Слишком часто');
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
   if (req.method === 'OPTIONS') return send(res, 204, '', cors);
   const key = url.searchParams.get('key') || '';
@@ -331,7 +349,8 @@ function unsubscribe(req, res, t) {
 // ---------- static ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 function serveStatic(req, res, pathname) {
-  let rel = decodeURIComponent(pathname);
+  let rel; try { rel = decodeURIComponent(pathname); } catch { return send(res, 400, 'Bad request', { 'Content-Type': 'text/plain' }); }
+  if (rel.includes('\0') || rel.includes('\\')) return send(res, 400, 'Bad request', { 'Content-Type': 'text/plain' });
   if (rel.startsWith('/core/')) { const f = path.normalize(path.join(ROOT, rel)); if (f.startsWith(path.join(ROOT, 'core') + path.sep) && fs.existsSync(f)) return send(res, 200, fs.readFileSync(f), { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' }); }
   if (rel === '/' || !path.extname(rel)) rel = '/index.html';
   const file = path.normalize(path.join(WEB, rel));
@@ -395,6 +414,10 @@ const server = http.createServer((req, res) => {
   });
 });
 server.requestTimeout = 120_000;
+server.maxRequestsPerSocket = 1000;
+// Любая неожиданная ошибка логируется, но не роняет процесс (в проде — плюс перезапуск через Docker/systemd).
+process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
+process.on('uncaughtException', (e) => console.error('[uncaughtException]', e));
 server.headersTimeout = 30_000;
 
 // ---------- background: email queue with warmup & human pacing ----------
@@ -427,6 +450,19 @@ async function emailTick() {
   }
 }
 
+// ---------- background: autopilot (утренний фокус и вечерний разбор по часовому поясу владельца) ----------
+async function autopilotTick() {
+  for (const ws of store.listWorkspaces()) {
+    const owner = store.membersOf(ws.id).find(m => m.role === 'owner');
+    const user = owner && store.userById(owner.id);
+    if (!user) continue;
+    const ctx = { store, ws, user, role: 'owner', demo: config.demoMode && ws.demo };
+    ctx.services = services(ctx); ctx.audit = async (e) => store.audit(e);
+    try { const r = await pipeline.autopilotTick(ctx); if (r) console.log('[autopilot]', ws.id, r.phase, r.steps.join(' | ')); }
+    catch (e) { console.warn('[autopilot]', ws.id, e.message); }
+  }
+}
+
 // ---------- startup ----------
 async function ensureDemo() {
   if (!config.demoMode || store.userByEmail('demo@leadmeet.local')) return;
@@ -441,6 +477,7 @@ export async function start(port = config.port) {
   await ensureDemo();
   store.purgeSessions();
   setInterval(() => emailTick().catch(e => console.warn('[email tick]', e.message)), 60_000).unref();
+  setInterval(() => autopilotTick().catch(e => console.warn('[autopilot tick]', e.message)), 5 * 60_000).unref();
   setInterval(() => { try { const b = backupNow(db); console.log('[backup]', path.basename(b.file)); } catch (e) { console.error('[backup]', e.message); } }, config.backupEveryHours * 3600_000).unref();
   setInterval(() => store.purgeSessions(), 3600_000).unref();
   try { if (!listBackups().length && store.countUsers() > 0) backupNow(db); } catch (e) { console.warn('[backup]', e.message); }

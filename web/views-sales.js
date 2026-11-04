@@ -2,12 +2,13 @@
 import { S, call, act, go, leadHash, scriptHash, hookName, offers } from './state.js';
 import { esc, icon, money, toast, modal, hint, copy, fmtDate, formData, scoreRing, pct, $, $$ } from './ui.js';
 import { uploadCallModal } from './views-main.js';
+import { safeUrl } from '../core/util.js';
 
 // ====================== ВСТРЕЧИ ======================
 export async function viewMeetings(el) {
   const ms = await call('GET', '/meetings');
   const up = ms.filter(m => m.status === 'scheduled'), past = ms.filter(m => m.status !== 'scheduled');
-  const row = (m) => `<div class="item"><span class="ico">${icon('calendar')}</span><div class="body"><div class="title">${fmtDate(m.at)} · ${esc(m.lead?.owner || '')} ${m.lead?.company ? '(' + esc(m.lead.company) + ')' : ''}</div><div class="small mute">${m.status === 'done' ? 'проведена' : m.status === 'noshow' ? 'не пришёл' : 'назначена'}${m.link ? ' · <a href="' + esc(m.link) + '" target="_blank" rel="noopener">ссылка на звонок</a>' : ''}</div></div>
+  const row = (m) => `<div class="item"><span class="ico">${icon('calendar')}</span><div class="body"><div class="title">${fmtDate(m.at)} · ${esc(m.lead?.owner || '')} ${m.lead?.company ? '(' + esc(m.lead.company) + ')' : ''}</div><div class="small mute">${m.status === 'done' ? 'проведена' : m.status === 'noshow' ? 'не пришёл' : 'назначена'}${safeUrl(m.link) ? ' · <a href="' + esc(safeUrl(m.link)) + '" target="_blank" rel="noopener">ссылка на звонок</a>' : ''}</div></div>
     <div class="row"><a class="btn sm primary" href="${scriptHash(m.leadId)}">Скрипт</a><button class="btn sm" data-up="${m.id}" data-lead="${m.leadId}">Загрузить запись</button>${m.status === 'scheduled' ? `<button class="btn sm ghost" data-noshow="${m.id}">Не пришёл</button>` : ''}<a class="btn sm ghost" href="${leadHash(m.leadId)}">Лид</a></div></div>`;
   el.innerHTML = `<div class="page-head"><div><h1>Встречи</h1><p>Перед каждой встречей — персональный скрипт продающего интервью; после — запись звонка на разбор.</p></div></div>
     <div class="card" data-tour="meetings-list"><h3>Предстоящие</h3><div class="list">${up.map(row).join('') || '<div class="empty">Встреч нет. Назначьте встречу из карточки лида, когда собственник ответит.</div>'}</div></div>

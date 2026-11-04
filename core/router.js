@@ -1,6 +1,6 @@
 // API-логика, общая для сервера (SQLite) и демо-версии (хранилище браузера).
 // ctx = { store, ws, user, role, services, audit }
-import { uid, nowIso, HttpError, need, sum, groupBy, pct, round, deepMerge, fmtMoney } from './util.js';
+import { uid, nowIso, HttpError, need, sum, groupBy, pct, round, deepMerge, fmtMoney, sanitizeObject, safeUrl, isEmail, safeDecode, clip } from './util.js';
 import { DEFAULT_OFFERS, PLANS, CREDIT_PACKS, CREDIT_COST, CHANNELS, STAGES, NICHES, PROOFS, BRAND, ROLES, can } from './catalog.js';
 import { vacancyToLead, buildHhQueries } from './hhSignals.js';
 import { draftMessage, followUp, HOOKS, REPLY_PLAYBOOK } from './generator.js';
@@ -11,6 +11,9 @@ import { buildCallScript } from './callscript.js';
 import { analyzeCall, learnFromCalls } from './callAnalysis.js';
 import { parseSite, parseTelegramChannel } from './research.js';
 import { funnelModel, payback, saasModel, channelRoi, PAYMENT_TERMS, paymentPlan } from './economics.js';
+import { parsePeople } from './research.js';
+import { DEFAULT_FILTERS } from './hhSignals.js';
+import { registerPipeline } from './pipeline.js';
 
 const routes = [];
 const R = (method, path, perm, fn) => {
@@ -25,8 +28,9 @@ export async function handle(ctx, method, path, body = {}, query = {}) {
     const m = path.match(r.re);
     if (!m) continue;
     if (r.perm && !can(ctx.role, r.perm)) throw new HttpError(403, 'Недостаточно прав для этого действия.');
-    const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
-    return await r.fn(ctx, { params, body: body || {}, query: query || {} });
+    const params = {};
+    for (let i = 0; i < r.keys.length; i++) { const v = safeDecode(m[i + 1]); if (v === null) throw new HttpError(400, 'Некорректный адрес.'); params[r.keys[i]] = v; }
+    return await r.fn(ctx, { params, body: sanitizeObject(body || {}), query: query || {} });
   }
   throw new HttpError(404, 'Нет такого метода API: ' + method + ' ' + path);
 }
@@ -50,9 +54,14 @@ export function defaultSettings(ws = {}) {
     usdRate: 92,
     offers: DEFAULT_OFFERS,
     sending: { dailyCap: 30, warmupStart: 5, warmupStep: 3, windowFrom: 9, windowTo: 18, weekdaysOnly: true, minGapSec: 120, maxGapSec: 420 },
-    hh: { roles: ['коммерческий директор', 'руководитель отдела продаж', 'директор по продажам', 'исполнительный директор', 'бизнес-ассистент собственника'], area: '', salaryFrom: 120000, period: 30, minScore: 45 },
+    hh: { roles: ['коммерческий директор', 'руководитель отдела продаж', 'директор по продажам', 'исполнительный директор', 'бизнес-ассистент собственника'], area: '', salaryFrom: 120000, period: 30, minScore: 45, resumeId: '', ...DEFAULT_FILTERS },
     llm: { enabled: true, model: 'claude-opus-5-5' },
-    onboardingDone: false,
+    tz: { mine: 'Asia/Ho_Chi_Minh', clients: 'Europe/Moscow' },
+    caps: { telegram: 25, whatsapp: 20, zalo: 20, hh_apply: 60, hh_chat: 80 },
+    autopilot: { enabled: false, morningHour: 8, eveningHour: 20, dailyNew: 20, prepare: 20, minScore: 45, autoResearch: true, noReplyDays: 3 },
+    proofs: null,
+    playbook: { hhLetter: '', notes: '' },
+    onboardingDone: false, launchDone: false,
   };
 }
 
@@ -114,7 +123,7 @@ R('POST', '/leads', 'leads', async (ctx, { body }) => {
   need(body.company || body.owner?.name, 400, 'Укажите компанию или имя собственника.');
   const lead = {
     id: uid('l_'), stage: 'new', source: body.source || 'manual', score: body.score ?? 50,
-    company: body.company || '', site: body.site || '', city: body.city || '', industry: body.industry || '',
+    company: clip(body.company || '', 300), site: safeUrl(body.site), city: clip(body.city || '', 120), industry: clip(body.industry || '', 60),
     owner: { name: body.owner?.name || '', role: body.owner?.role || 'Собственник', social: body.owner?.social || {} },
     contacts: body.contacts || {}, facts: body.facts || [], hypotheses: body.hypotheses || [{ pain: 'Рост упёрся в систему продаж и найма.', offerId: 'setup' }],
     notes: body.notes || '', tags: body.tags || [], utm: body.utm || null,
@@ -138,6 +147,8 @@ R('PUT', '/leads/:id', 'leads', async (ctx, { params, body }) => {
   const lead = await get(ctx, 'leads', params.id);
   const allowed = ['company', 'site', 'city', 'industry', 'owner', 'contacts', 'facts', 'hypotheses', 'notes', 'tags', 'stage', 'optOut', 'score'];
   for (const k of allowed) if (k in body) lead[k] = k === 'owner' ? deepMerge(lead.owner, body.owner) : body[k];
+  if ('site' in body) lead.site = safeUrl(body.site);
+  if (body.contacts) { lead.contacts.emails = (lead.contacts.emails || []).filter(isEmail); if (lead.contacts.ownerEmail && !isEmail(lead.contacts.ownerEmail)) throw new HttpError(400, 'Некорректный email собственника.'); }
   if (body.stage) (lead.history ||= []).push({ at: nowIso(), stage: body.stage, manual: true });
   await put(ctx, 'leads', lead);
   return lead;
@@ -168,6 +179,34 @@ R('POST', '/leads/:id/research', 'leads', async (ctx, { params, body }) => {
       mergeFacts(lead, p.facts);
       log.push(`Сайт: ${p.facts.length} фактов, ${p.emails.length} email, ${p.phones.length} тел.`);
     } catch (e) { log.push('Сайт не открылся: ' + e.message); }
+  }
+  if (lead.site && ctx.services?.web?.teamPages) {
+    try {
+      const pages = await ctx.services.web.teamPages(lead.site, 3);
+      const people = pages.flatMap(p => parsePeople(p.html).map(x => ({ ...x, source: p.url })));
+      if (people.length) {
+        lead.people = people.slice(0, 6);
+        const top = people[0];
+        if (!lead.owner.name) { lead.owner.name = top.name; lead.owner.role = top.role; }
+        mergeFacts(lead, people.slice(0, 2).map(x => ({ kind: 'site_team', text: `на сайте указан: ${x.name} — ${x.role}`, source: x.source })));
+        log.push(`Команда: найдено ${people.length} чел., ЛПР — ${top.name} (${top.role})`);
+      }
+    } catch (e) { log.push('Страницы команды: ' + e.message); }
+  }
+  if (ctx.services?.dadata?.findCompany && lead.company) {
+    try {
+      const c = await ctx.services.dadata.findCompany(ctx, { query: lead.company, city: lead.city });
+      if (c) {
+        lead.egrul = c;
+        if (c.director && !lead.owner.name) { lead.owner.name = c.director; lead.owner.role = c.directorPost || 'Генеральный директор'; }
+        mergeFacts(lead, [
+          c.director ? { kind: 'egrul', text: `по ЕГРЮЛ руководитель — ${c.director}${c.directorPost ? ' (' + c.directorPost.toLowerCase() + ')' : ''}`, source: 'ЕГРЮЛ' } : null,
+          c.registered ? { kind: 'egrul', text: `компания зарегистрирована в ${c.registered.slice(0, 4)} году`, source: 'ЕГРЮЛ' } : null,
+          c.employees ? { kind: 'egrul', text: `сотрудников по данным ФНС: ${c.employees}`, source: 'ЕГРЮЛ' } : null,
+        ].filter(Boolean));
+        log.push('ЕГРЮЛ: ' + (c.director || 'руководитель не указан'));
+      }
+    } catch (e) { log.push('ЕГРЮЛ: ' + e.message); }
   }
   if (tg && ctx.services?.web?.telegram) {
     try {
@@ -219,24 +258,31 @@ R('POST', '/leads/:id/draft', 'messages', async (ctx, { params, body }) => {
     offer = settings.offers.find(o => o.id === v.offerId);
   }
   const channel = body.channel || 'email';
-  let d = body.followUp ? followUp({ lead, step: body.followUp, channel, me: settings.me }) : draftMessage({ lead, me: settings.me, hook, channel, offer });
+  const proofs = Array.isArray(settings.proofs) ? settings.proofs : (ctx.ws.kind === 'client' ? [] : PROOFS);
+  let d = body.followUp ? followUp({ lead, step: body.followUp, channel, me: settings.me, proofs }) : draftMessage({ lead, me: settings.me, hook, channel, offer, proofs });
   let usedLlm = false;
   const llmOn = body.useLlm !== false && settings.llm?.enabled && ctx.services?.llm && await ctx.services.llm.available(ctx);
   if (llmOn && !body.followUp) {
     await spend(ctx, 'llm_message');
     try {
-      const r = await ctx.services.llm.rewrite(ctx, { draft: d, lead, me: settings.me, hook, channel, proofs: PROOFS });
+      const r = await ctx.services.llm.rewrite(ctx, { draft: d, lead, me: settings.me, hook, channel, proofs: proofs.length ? proofs : [{ text: 'кейсов пока нет — не упоминай цифры результатов' }] });
       if (r && r.body) { d = { ...d, subject: r.subject ?? d.subject, body: r.body }; usedLlm = true; }
     } catch (e) { d.llmError = e.message; }
   } else await spend(ctx, 'message');
-  const quality = checkMessage({ subject: d.subject, body: d.body, channel, lead });
+  const quality = checkMessage({ subject: d.subject, body: d.body, channel, lead, sources: sourcesText(settings, proofs) });
   return { ...d, experimentId, variantId, usedLlm, quality };
 });
 
 R('POST', '/messages/check', 'messages', async (ctx, { body }) => {
   const lead = body.leadId ? await get(ctx, 'leads', body.leadId) : {};
-  return checkMessage({ ...body, lead });
+  const settings = await getSettings(ctx);
+  return checkMessage({ ...body, lead, sources: sourcesText(settings, Array.isArray(settings.proofs) ? settings.proofs : PROOFS) });
 });
+
+/** Всё, на что письмо может ссылаться цифрами: кейсы, офферы, подпись. */
+export function sourcesText(settings, proofs) {
+  return JSON.stringify([proofs, settings.offers, settings.me?.signature, settings.me?.title]);
+}
 
 R('GET', '/messages', 'messages:read', async (ctx, { query }) => {
   let msgs = await list(ctx, 'messages');
@@ -247,6 +293,8 @@ R('GET', '/messages', 'messages:read', async (ctx, { query }) => {
 R('POST', '/leads/:id/messages', 'messages', async (ctx, { params, body }) => {
   const lead = await get(ctx, 'leads', params.id);
   need(body.body, 400, 'Пустое сообщение.');
+  need(String(body.body).length <= 20000, 400, 'Слишком длинное сообщение.');
+  if ((body.channel || 'email') === 'email' && body.to && !isEmail(body.to)) throw new HttpError(400, 'Некорректный email получателя.');
   if (lead.optOut) throw new HttpError(409, 'Контакт попросил больше не писать — отправка заблокирована.');
   const msg = {
     id: uid('m_'), leadId: lead.id, direction: 'out', channel: body.channel || 'email',
@@ -288,6 +336,7 @@ R('POST', '/messages/:id/send', 'messages', async (ctx, { params, body }) => {
   const settings = await getSettings(ctx);
   if (msg.channel === 'email' && !body.manual) {
     need(msg.to, 400, 'Нет email получателя. Добавьте его в карточку лида.');
+    need(isEmail(msg.to), 400, 'Некорректный email получателя.');
     if (!ctx.services?.mail) throw new HttpError(400, 'Почта не подключена. Раздел «Каналы» → Почта (SMTP).');
     const quota = await sendQuota(ctx, settings);
     if (!body.now || quota.left <= 0) {
@@ -359,8 +408,8 @@ R('POST', '/hh/search', 'leads', async (ctx, { body }) => {
       const res = await ctx.services.hh.search(ctx, q);
       for (const v of res.items || []) {
         if (seen.has(v.id)) continue; seen.add(v.id);
-        const lead = vacancyToLead(v, { niche: cfg.niche });
-        out.push({ raw: v, preview: { company: lead.company, title: lead.vacancy.title, salary: lead.vacancy.salaryRub, area: lead.vacancy.area, score: lead.score, reasons: lead.scoreReasons, url: lead.vacancy.url, imported: existing.has(lead.sourceRef) } });
+        const lead = vacancyToLead(v, { niche: cfg.niche, filters: cfg });
+        out.push({ raw: v, preview: { company: lead.company, title: lead.vacancy.title, salary: lead.vacancy.salaryRub, area: lead.vacancy.area, score: lead.score, scoring10: Math.round(lead.score / 10), reasons: lead.scoreReasons, stops: lead.stops, flags: lead.flags, url: lead.vacancy.url, imported: existing.has(lead.sourceRef) } });
       }
     } catch (e) { errors.push(q.text + ': ' + e.message); }
   }
@@ -375,7 +424,7 @@ R('POST', '/hh/import', 'leads', async (ctx, { body }) => {
   for (const raw of items) {
     let v = raw;
     if (ctx.services?.hh?.vacancy && !raw.description) { try { v = { ...raw, ...(await ctx.services.hh.vacancy(ctx, raw.id)) }; } catch { /* оставляем краткую версию */ } }
-    const lead = vacancyToLead(v, { niche: body.niche });
+    const lead = vacancyToLead(v, { niche: body.niche, filters: (await getSettings(ctx)).hh });
     if (existing.has(lead.sourceRef)) continue;
     if (ctx.services?.hh?.employer && v.employer?.id) {
       try {
@@ -398,9 +447,9 @@ export async function inboundLead(ctx, channel, payload = {}) {
   const p = flatten(payload);
   const lead = {
     id: uid('l_'), stage: 'new', source: 'inbound:' + channel, score: 70,
-    company: p.company || p.компания || '', site: p.site || '', city: p.city || '',
+    company: p.company || p.компания || '', site: safeUrl(p.site), city: p.city || '',
     owner: { name: p.name || p.имя || p.full_name || '', role: p.role || 'Заявка', social: { telegram: p.telegram || '' } },
-    contacts: { emails: [p.email].filter(Boolean), phones: [p.phone || p.телефон].filter(Boolean) },
+    contacts: { emails: [p.email].filter(isEmail), phones: [p.phone || p.телефон].filter(Boolean).map(x => String(x).replace(/[^\d+()\- ]/g, '').slice(0, 30)) },
     facts: [], hypotheses: [{ pain: p.message || p.comment || 'Входящая заявка — уточнить задачу на созвоне.', offerId: 'audit' }],
     utm: { source: p.utm_source, medium: p.utm_medium, campaign: p.utm_campaign, content: p.utm_content, term: p.utm_term },
     notes: p.message || p.comment || '',
@@ -410,7 +459,16 @@ export async function inboundLead(ctx, channel, payload = {}) {
   if (ctx.services?.notify) await Promise.resolve(ctx.services.notify(ctx, `🆕 Заявка (${channel}): ${lead.owner.name || ''} ${lead.contacts.phones[0] || lead.contacts.emails[0] || ''}\n${lead.notes}`)).catch(() => {});
   return lead;
 }
-function flatten(o, out = {}) { for (const [k, v] of Object.entries(o || {})) { if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, out); else out[k.toLowerCase()] = Array.isArray(v) ? v.join(', ') : v; } return out; }
+function flatten(o, out = Object.create(null), depth = 0) {
+  if (depth > 6) return out;
+  for (const [k, v] of Object.entries(o || {})) {
+    const key = String(k).toLowerCase().slice(0, 60);
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+    if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, out, depth + 1);
+    else out[key] = clip(Array.isArray(v) ? v.slice(0, 20).join(', ') : v == null ? '' : String(v), 2000);
+  }
+  return out;
+}
 
 // ---------- experiments ----------
 R('GET', '/experiments', 'messages:read', async (ctx) => {
@@ -456,7 +514,8 @@ export async function experimentStats(ctx, exp) {
 // ---------- meetings, scripts, calls ----------
 R('POST', '/leads/:id/meeting', 'meetings', async (ctx, { params, body }) => {
   const lead = await get(ctx, 'leads', params.id);
-  const mt = { id: uid('mt_'), leadId: lead.id, at: body.at || new Date(Date.now() + 86400000).toISOString(), status: 'scheduled', link: body.link || '', notes: body.notes || '' };
+  const at = body.at && !Number.isNaN(new Date(body.at).getTime()) ? new Date(body.at).toISOString() : new Date(Date.now() + 86400000).toISOString();
+  const mt = { id: uid('mt_'), leadId: lead.id, at, status: 'scheduled', link: safeUrl(body.link), notes: clip(body.notes || '', 2000) };
   await put(ctx, 'meetings', mt);
   advance(lead, 'meeting');
   await put(ctx, 'leads', lead);
@@ -471,7 +530,8 @@ R('GET', '/meetings', 'meetings:read', async (ctx) => {
 
 R('PUT', '/meetings/:id', 'meetings', async (ctx, { params, body }) => {
   const mt = await get(ctx, 'meetings', params.id);
-  for (const k of ['at', 'status', 'link', 'notes', 'outcome']) if (k in body) mt[k] = body[k];
+  for (const k of ['at', 'status', 'notes', 'outcome']) if (k in body) mt[k] = clip(body[k], 2000);
+  if ('link' in body) mt.link = safeUrl(body.link);
   await put(ctx, 'meetings', mt);
   return mt;
 });
@@ -521,7 +581,8 @@ R('POST', '/deals', 'deals', async (ctx, { body }) => {
 });
 R('PUT', '/deals/:id', 'deals', async (ctx, { params, body }) => {
   const deal = await get(ctx, 'deals', params.id);
-  for (const k of ['status', 'paidRub', 'items', 'amountRub']) if (k in body) deal[k] = body[k];
+  if ('status' in body) { need(['open', 'won', 'lost'].includes(body.status), 400, 'Некорректный статус сделки.'); deal.status = body.status; }
+  if ('paidRub' in body) deal.paidRub = Math.max(0, Number(body.paidRub) || 0);
   await put(ctx, 'deals', deal);
   if (body.status === 'won' || body.status === 'lost') { const lead = await get(ctx, 'leads', deal.leadId); advance(lead, body.status); await put(ctx, 'leads', lead); }
   await audit(ctx, 'deal.update', { id: deal.id, status: deal.status });
@@ -584,7 +645,7 @@ R('PUT', '/channels/:type', 'settings', async (ctx, { params, body }) => {
   need(def, 404, 'Нет такого канала.');
   const cur = await S(ctx).get(ctx.ws.id, 'channels', params.type) || { id: params.type, type: params.type, config: {}, hookKey: uid('k') };
   if ('enabled' in body) cur.enabled = !!body.enabled;
-  if ('spendRub' in body) cur.spendRub = Number(body.spendRub) || 0;
+  if ('spendRub' in body) cur.spendRub = Math.max(0, Math.min(1e10, Number(body.spendRub) || 0));
   for (const f of def.fields) {
     const v = body.config?.[f.k];
     if (v === undefined || (f.secret && String(v).startsWith('••••'))) continue;
@@ -602,17 +663,27 @@ R('POST', '/channels/:type/test', 'settings', async (ctx, { params }) => {
 
 // ---------- workspaces / client cabinets ----------
 R('POST', '/workspaces', 'settings', async (ctx, { body }) => {
-  need(body.name, 400, 'Название кабинета обязательно.');
-  const ws = await S(ctx).createWorkspace({ name: body.name, kind: body.kind || 'client', plan: body.plan || 'start', parentId: ctx.ws.id, credits: PLANS.find(p => p.id === (body.plan || 'start'))?.credits || 300, ownerUserId: ctx.user?.id });
+  need(body.name && String(body.name).trim(), 400, 'Название кабинета обязательно.');
+  const parent = await S(ctx).getWorkspace(ctx.ws.id);
+  const plan = PLANS.find(p => p.id === parent.plan) || PLANS[0];
+  const children = (await S(ctx).listWorkspaces()).filter(w => w.parentId === parent.id);
+  if (children.length + 1 >= plan.workspaces) throw new HttpError(402, `Тариф «${plan.name}» позволяет ${plan.workspaces} кабинет(ов). Перейдите на тариф выше, чтобы открыть ещё.`);
+  // Кредиты не создаются из воздуха: передаются из баланса родительского кабинета.
+  const transfer = Math.max(0, Math.floor(Number(body.credits) || 0));
+  if (transfer > (parent.credits || 0)) throw new HttpError(402, `Недостаточно кредитов для передачи: доступно ${parent.credits || 0}.`);
+  parent.credits = (parent.credits || 0) - transfer;
+  await S(ctx).saveWorkspace(parent);
+  const childPlan = PLANS.some(p => p.id === body.plan) ? body.plan : 'start';
+  const ws = await S(ctx).createWorkspace({ name: clip(String(body.name).trim(), 120), kind: 'client', plan: childPlan, parentId: parent.id, credits: transfer, ownerUserId: ctx.user?.id });
   if (body.cloneFrom !== false) {
-    // «Отгрузить идеальную модель»: копируем настройки, офферы и эксперименты-победители.
+    // «Отгрузить идеальную модель»: настройки, офферы, правила и эксперименты. Кейсы клиент вносит свои.
     const settings = await getSettings(ctx);
-    const clone = { ...settings, brand: { ...settings.brand, name: body.name }, onboardingDone: false };
+    const clone = { ...settings, brand: { ...settings.brand, name: ws.name }, proofs: [], onboardingDone: false, autopilot: { ...settings.autopilot, enabled: false } };
     await S(ctx).put(ws.id, 'settings', { ...clone, id: 'main', createdAt: nowIso(), updatedAt: nowIso() });
     for (const e of await list(ctx, 'experiments')) await S(ctx).put(ws.id, 'experiments', { ...e, id: uid('x_'), status: 'running', createdAt: nowIso() });
   }
   if (ctx.onWorkspaceCreated) await ctx.onWorkspaceCreated(ws);
-  await audit(ctx, 'workspace.create', { id: ws.id, name: ws.name });
+  await audit(ctx, 'workspace.create', { id: ws.id, name: ws.name, credits: transfer });
   return ws;
 });
 
@@ -640,5 +711,8 @@ R('GET', '/investors', 'investors', async (ctx) => {
 
 R('GET', '/audit/verify', 'settings', async (ctx) => ctx.services?.auditVerify ? ctx.services.auditVerify(ctx) : { ok: true, entries: 0, note: 'Журнал целостности доступен в серверной версии.' });
 R('GET', '/audit', 'settings', async (ctx, { query }) => ctx.services?.auditList ? ctx.services.auditList(ctx, Number(query.limit) || 100) : []);
+
+// Конвейер, автопилот, hh-отклики, CRM-файл, прогноз — отдельный модуль, без циклических импортов.
+export const pipeline = registerPipeline(R, { list, get, put, spend, audit, advance, getSettings, handle, deepLink, sendQuota });
 
 export { routes };

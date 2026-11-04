@@ -22,13 +22,18 @@ export const PROOFS = [
   { id: '998', isCase: true, short: '998 кандидатов за сутки', text: 'запуск автонайма дал 998 кандидатов за одни сутки', niche: ['hiring'], url: 'https://t.me/vladlev1/4339' },
   { id: '5in2', isCase: true, short: '5 менеджеров за 2 недели', text: '5 менеджеров за 2 недели: просмотры вакансии выросли в 11 раз, отклики — втрое', niche: ['hiring', 'sales'], url: 'https://t.me/vladlev1/3946' },
   { id: '200', short: 'Отдел на 200+ менеджеров', text: 'я сам строил и вёл отдел продаж на 200+ менеджеров', niche: ['sales'], url: 'https://t.me/hrleadmeet' },
+  { id: 'partizan', isCase: true, short: '3 сделки на 1,5+ млн ₽ за месяц через hh.ru', text: 'за месяц через hh.ru закрыл 3 сделки на 1,5+ млн ₽ — собственники сами звали на встречу', niche: ['sales', 'it', 'services', 'all'], url: 'https://t.me/vladlev1' },
+  { id: 'close28', isCase: true, short: 'Встреча → продажа: 14% → 28%', text: 'после разбора записей 10 встреч конверсия встреча → продажа выросла с 14% до 28% за 2 недели', niche: ['sales', 'all'], url: 'https://t.me/vladlev1' },
   { id: 'reviews', short: '500+ отзывов', text: 'в открытом канале больше 500 отзывов сотрудников и заказчиков', niche: ['all'], url: 'https://t.me/VLADLEVOTZIV' },
 ];
 
 /** Твоя продуктовая линейка (из калькулятора) + консалтинг и настройка, как в кейсе с Дмитрием. */
 export const DEFAULT_OFFERS = [
   { id: 'audit', name: 'Бесплатный аудит воронки (30–40 мин)', priceRub: 0, kind: 'lead_magnet', desc: 'Разбор воронки по цифрам, диагноз и план действий. Вход в воронку.' },
+  { id: 'start', name: 'START: скрипты, CRM, KPI, аудит', priceRub: 75000, kind: 'service', desc: 'Скрипты, CRM, KPI и аудит за 7 дней (50 000 – 100 000 ₽).' },
   { id: 'consult', name: 'Консалтинг: стратсессия + план', priceRub: 50000, kind: 'consulting', desc: 'Диагностика бизнеса собственника, карта узких мест, план на 90 дней.' },
+  { id: 'hire', name: 'НАЙМ МОП: найм + адаптация + вывод на план', priceRub: 185000, kind: 'service', desc: 'Найм, адаптация и вывод менеджера на план за 7–14 дней (120 000 – 250 000 ₽).' },
+  { id: 'roi', name: 'ROI-PARTNER: 15% выручки', priceRub: 0, kind: 'partner', desc: 'Под ключ с ведением, без входного платежа, от 3 месяцев — 15% выручки отдела.' },
   { id: 'setup', name: 'Настройка системы привлечения/продаж', priceRub: 250000, kind: 'setup', desc: 'Внедрение системы: воронка, скрипты, найм, контроль. Как в кейсе «Дмитрий».' },
   { id: 'l1', name: 'Уровень 1 · Найм', priceRub: 99900, kind: 'service', desc: 'Упаковка вакансии, воронка откликов, отбор, выход менеджера.' },
   { id: 'l2', name: 'Уровень 2 · Система найма', priceRub: 209900, kind: 'service', desc: 'Поток 100+ откликов, KPI, адаптация, 2–3 менеджера в штате (189 900 – 229 900 ₽).' },
@@ -54,7 +59,8 @@ export const CREDIT_COST = { research: 1, message: 1, llm_message: 2, call_analy
 
 /** Каналы: адаптеры входа лидов и исходящих касаний. mode: 'api' — реальная интеграция; 'webhook' — приём; 'manual' — живое касание с подготовленным текстом. */
 export const CHANNELS = [
-  { type: 'hh', name: 'HeadHunter (вакансии топ-позиций)', dir: 'in', mode: 'api', fields: [{ k: 'userAgent', label: 'HH-User-Agent (название приложения и email)', secret: false }, { k: 'token', label: 'OAuth-токен работодателя/приложения (необязательно)', secret: true }], doc: 'Официальный API api.hh.ru: поиск вакансий и карточки работодателей.' },
+  { type: 'hh', name: 'HeadHunter (вакансии и отклики)', dir: 'both', mode: 'api', fields: [{ k: 'userAgent', label: 'HH-User-Agent (название приложения и email)', secret: false }, { k: 'token', label: 'OAuth-токен приложения (поиск, необязательно)', secret: true }, { k: 'applicantToken', label: 'OAuth-токен соискателя (для откликов и переписки)', secret: true }, { k: 'resumeId', label: 'ID резюме для откликов' }], doc: 'Официальный API api.hh.ru: поиск вакансий, карточки работодателей, отклики и переписка соискателя. Капчу hh.ru решаете вы — приложение даёт ссылку.' },
+  { type: 'dadata', name: 'ЕГРЮЛ (DaData): руководитель компании', dir: 'none', mode: 'api', fields: [{ k: 'apiKey', label: 'API-ключ DaData', secret: true }], doc: 'Официальные данные ФНС: руководитель, дата регистрации, численность. Помогает найти собственника, если на сайте его нет.' },
   { type: 'email', name: 'Почта (SMTP)', dir: 'out', mode: 'api', fields: [{ k: 'host', label: 'SMTP-сервер' }, { k: 'port', label: 'Порт (465/587)' }, { k: 'user', label: 'Логин' }, { k: 'pass', label: 'Пароль приложения', secret: true }, { k: 'from', label: 'От кого (Влад Лев <vlad@...>)' }, { k: 'dailyCap', label: 'Лимит писем в день (рекомендуется ≤ 40)' }], doc: 'Свой ящик на своём домене с SPF/DKIM/DMARC. Прогрев, лимиты, отписка.' },
   { type: 'telegram_bot', name: 'Telegram-бот (уведомления и заявки)', dir: 'both', mode: 'api', fields: [{ k: 'botToken', label: 'Токен бота от @BotFather', secret: true }, { k: 'chatId', label: 'Ваш chat_id для уведомлений' }], doc: 'Уведомления о новых лидах и ответах, приём заявок.' },
   { type: 'telegram_personal', name: 'Telegram (рабочий профиль)', dir: 'out', mode: 'manual', fields: [{ k: 'username', label: 'Ваш @username' }], doc: 'Живые сообщения с вашего профиля: приложение готовит текст и открывает чат одной кнопкой. Без юзерботов — без банов.' },

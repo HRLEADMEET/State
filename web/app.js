@@ -5,16 +5,20 @@ import { viewDashboard, viewSignals, viewLeads, viewLead } from './views-main.js
 import { viewMeetings, viewScript, viewCalls, viewExperiments, viewAnalytics } from './views-sales.js';
 import { viewChannels, viewCabinets, viewInvestors, viewSecurity, viewPrefs, viewMemo, catSvg, fraudMemoHtml } from './views-admin.js';
 import { startTour } from './tour.js';
+import { viewQueue, viewForecast, viewLaunch } from './views-flow.js';
 
 const NAV = [
   { id: 'dashboard', name: 'Пульт', icon: 'home' },
+  { id: 'queue', name: 'Конвейер', icon: 'send', count: 'queue' },
   { id: 'signals', name: 'Сигналы HH', icon: 'radar' },
   { id: 'leads', name: 'Лиды', icon: 'users', count: 'leads' },
   { id: 'meetings', name: 'Встречи', icon: 'calendar', count: 'meetings' },
   { id: 'calls', name: 'Разбор звонков', icon: 'mic' },
   { id: 'experiments', name: 'A/B заходов', icon: 'flask' },
   { id: 'analytics', name: 'Аналитика и деньги', icon: 'chart' },
+  { id: 'forecast', name: 'Что даст 100', icon: 'spark' },
   { sep: 'Система' },
+  { id: 'launch', name: 'Мастер запуска', icon: 'check' },
   { id: 'channels', name: 'Каналы', icon: 'plug' },
   { id: 'cabinets', name: 'Кабинеты и тарифы', icon: 'layers' },
   { id: 'investors', name: 'Инвесторам', icon: 'eye' },
@@ -22,8 +26,8 @@ const NAV = [
   { id: 'prefs', name: 'Настройки', icon: 'sliders' },
   { id: 'memo', name: 'Памятка с котиком', icon: 'cat' },
 ];
-const VIEWS = { dashboard: viewDashboard, signals: viewSignals, leads: viewLeads, lead: viewLead, meetings: viewMeetings, script: viewScript, calls: viewCalls, experiments: viewExperiments, analytics: viewAnalytics, channels: viewChannels, cabinets: viewCabinets, investors: viewInvestors, security: viewSecurity, prefs: viewPrefs, memo: viewMemo };
-const OBSERVER_VIEWS = ['investors', 'analytics', 'memo'];
+const VIEWS = { queue: viewQueue, forecast: viewForecast, launch: viewLaunch, dashboard: viewDashboard, signals: viewSignals, leads: viewLeads, lead: viewLead, meetings: viewMeetings, script: viewScript, calls: viewCalls, experiments: viewExperiments, analytics: viewAnalytics, channels: viewChannels, cabinets: viewCabinets, investors: viewInvestors, security: viewSecurity, prefs: viewPrefs, memo: viewMemo };
+const OBSERVER_VIEWS = ['investors', 'analytics', 'memo', 'forecast'];
 
 export async function boot(api) {
   S.api = api;
@@ -160,14 +164,14 @@ function renderShell() {
   route();
   updateCounts();
   if (!b.settings.onboardingDone && b.role !== 'observer') setTimeout(() => startTour(), 600);
+  else if (!b.settings.launchDone && b.role === 'owner' && !b.demo && !location.hash) location.hash = '#launch';
 }
 
 export async function updateCounts() {
   try {
-    const [leads, meetings] = await Promise.all([call('GET', '/leads'), call('GET', '/meetings')]);
-    const c = { leads: leads.filter(l => !['won', 'lost'].includes(l.stage)).length, meetings: meetings.filter(m => m.status === 'scheduled').length };
+    const c = await call('GET', '/counts');
     $$('[data-count]').forEach(el => { el.textContent = c[el.dataset.count] || ''; });
-    const cr = $('#credit-count'); if (cr) { const bt = await call('GET', '/bootstrap'); S.boot.ws.credits = bt.ws.credits; cr.textContent = bt.ws.credits; }
+    const cr = $('#credit-count'); if (cr) { S.boot.ws.credits = c.credits; cr.textContent = c.credits; }
   } catch { /* счётчики не критичны */ }
 }
 

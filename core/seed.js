@@ -1,13 +1,30 @@
 // Демо-воронка «от сигнала до сделки» — прогоняется через тот же API, что и реальная работа.
 // Это одновременно пример для обучения и сквозной тест всех этапов.
 import { handle } from './router.js';
-import { MOCK_VACANCIES, MOCK_EMPLOYERS, MOCK_SITES, MOCK_TELEGRAM, MOCK_TRANSCRIPT, MOCK_REPLY_DMITRY } from './mocks.js';
+import { MOCK_VACANCIES, MOCK_EMPLOYERS, MOCK_SITES, MOCK_TELEGRAM, MOCK_TRANSCRIPT, MOCK_REPLY_DMITRY, MOCK_TEAM } from './mocks.js';
 import { uid } from './util.js';
 import { HttpError } from './util.js';
 
 export function mockServices(extra = {}) {
+  let applies = 0;
+  const negotiations = new Map();
   return {
     hh: {
+      // Отклик соискателя: каждый третий — капча, как это бывает на hh.ru при частых откликах.
+      async apply(ctx, { vacancyId }) {
+        applies++;
+        if (applies % 3 === 0) return { captchaUrl: 'https://hh.ru/account/captcha?demo=1&vacancy=' + encodeURIComponent(vacancyId || '') };
+        const id = 'neg-' + uid();
+        negotiations.set(id, { vacancyId, at: Date.now() });
+        return { negotiationId: id };
+      },
+      // Через минуту после первого отклика «работодатель» отвечает цифрами — чтобы в демо был виден шаг 2а.
+      async messages(ctx, nid) {
+        const n = negotiations.get(nid);
+        if (!n) return [];
+        return [{ author: 'employer', at: new Date(n.at + 60000).toISOString(), text: 'Здравствуйте! Лидов около 120 в месяц, с сайта и Директа. Нужно 3 менеджера. Когда удобно созвониться?' }];
+      },
+      async resumes() { return [{ id: 'demo-resume', title: 'Руководитель отдела продаж (проектно)' }]; },
       async search(ctx, q) {
         const t = (q.text || '').toLowerCase().replace(/name:\(|\)/g, '');
         const words = t.split(/\s+/).filter(w => w.length > 3);
@@ -16,7 +33,14 @@ export function mockServices(extra = {}) {
       async vacancy(ctx, id) { const v = MOCK_VACANCIES.find(x => x.id === id); if (!v) throw new HttpError(404, 'нет вакансии'); return v; },
       async employer(ctx, id) { const e = MOCK_EMPLOYERS[id]; if (!e) throw new HttpError(404, 'нет работодателя'); return e; },
     },
+    dadata: {
+      async findCompany(ctx, { query }) {
+        if (/технос/i.test(query)) return { inn: '7700000000', director: 'Орлов Дмитрий Сергеевич', directorPost: 'Генеральный директор', registered: '2014-03-11', employees: 38, okved: '33.12' };
+        return null;
+      },
+    },
     web: {
+      async teamPages(site) { return MOCK_TEAM[String(site).replace(/\/$/, '')] ? [{ url: site + '/team', html: MOCK_TEAM[String(site).replace(/\/$/, '')] }] : []; },
       async fetch(url) { const k = String(url).replace(/\/$/, ''); if (MOCK_SITES[k]) return MOCK_SITES[k]; throw new Error('демо: сайт недоступен'); },
       async telegram(name) { if (MOCK_TELEGRAM[name]) return MOCK_TELEGRAM[name]; throw new Error('демо: канал не найден'); },
     },
@@ -85,6 +109,9 @@ export async function seedDemo(ctx) {
 
   // 9) Синтетическая история касаний для A/B (чтобы аналитика была не пустой)
   await syntheticHistory(ctx, exp);
+
+  // 10) Конвейер на сегодня: готовые касания для «нажал — отправил» с телефона
+  await api('POST', '/queue/prepare', { limit: 6 });
   return { experimentId: exp.id, dmitryId: dmitry.id, dealId: deal.id };
 }
 

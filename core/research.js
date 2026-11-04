@@ -13,14 +13,14 @@ const SOCIAL = [
 ];
 
 export function parseSite(html = '', url = '') {
-  const h = String(html);
+  const h = String(html).slice(0, 800_000); // ограничение защищает регулярки от патологически больших страниц
   const meta = (name) => (h.match(new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]*content=["']([^"']+)`, 'i')) || h.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*(?:name|property)=["']${name}["']`, 'i')) || [])[1] || '';
   const title = stripHtml((h.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
   const description = stripHtml(meta('description') || meta('og:description'));
   const h1 = [...h.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/gi)].map(m => stripHtml(m[1])).filter(Boolean).slice(0, 3);
   const h2 = [...h.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)].map(m => stripHtml(m[1])).filter(Boolean).slice(0, 8);
   const text = stripHtml(h);
-  const emails = [...new Set((h.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || []).filter(e => !/\.(png|jpg|svg|webp|gif)$/i.test(e) && !/@(example\.(com|org|net)|domain\.|sentry|wixpress|email\.)/i.test(e)))].slice(0, 5);
+  const emails = [...new Set((h.match(/[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,4}\.[A-Za-z]{2,24}/g) || []).filter(e => !/\.(png|jpg|svg|webp|gif)$/i.test(e) && !/@(example\.(com|org|net)|domain\.|sentry|wixpress|email\.)/i.test(e)))].slice(0, 5);
   const phones = [...new Set((text.match(/(?:\+7|8)[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}/g) || []).map(p => p.replace(/[^\d+]/g, '').replace(/^8/, '+7')))].slice(0, 3);
   const social = {};
   for (const [k, re] of SOCIAL) {
@@ -46,8 +46,36 @@ export function parseSite(html = '', url = '') {
   return { url, title, description, h1, h2, emails, phones, social, facts: facts.slice(0, 8), textSample: truncate(text, 1500) };
 }
 
+const OWNER_ROLES = [
+  [/(собственник|владел|основател|сооснователь|учредител|founder|co-founder|owner)/i, 3, 'собственник'],
+  [/(генеральн[а-яё]* директор|ceo|управляющ[а-яё]* партн|директор компании)/i, 2, 'генеральный директор'],
+  [/(коммерческ[а-яё]* директор|директор по продажам|руководитель отдела продаж)/i, 1, 'коммерческий директор'],
+];
+const NAME_RE = /([А-ЯЁ][а-яё]{1,20}(?:-[А-ЯЁ][а-яё]{1,20})?\s+[А-ЯЁ][а-яё]{1,20}(?:\s+[А-ЯЁ][а-яё]{2,20}(?:вич|вна|ична|оглы|кызы))?)/g;
+const NOT_NAMES = /^(Наша|Наши|Мы |О компании|Контакты|Главная|Связаться|Политика|Команда|Отдел|Директор|Генеральный|Коммерческий|Основатель|Собственник|Все права|Москва|Россия|Санкт)/;
+
+/** Люди и роли со страниц «Команда / О нас»: ищем ЛПР (собственник → гендиректор → коммерческий директор). */
+export function parsePeople(html = '') {
+  const blocky = String(html).slice(0, 600_000).replace(/<\/(div|p|li|h[1-6]|td|tr|section|article|figcaption|span|a|b|strong)>/gi, '\n');
+  const text = stripHtml(blocky);
+  const chunks = text.split(/\n|(?<=[.!?])\s+|\|/).map(x => x.trim()).filter(x => x.length > 3 && x.length < 400);
+  const namesIn = (c) => [...(c || '').matchAll(NAME_RE)].map(m => m[1].trim())
+    .filter(n => !NOT_NAMES.test(n) && !n.split(/\s+/).some(w => /^(Директор|Основатель|Собственник|Компания|Отдел|Продаж|Генеральный|Коммерческий|Управляющий)$/i.test(w)));
+  const people = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const hit = OWNER_ROLES.find(([re]) => re.test(chunks[i]));
+    if (!hit) continue;
+    const [, prio, role] = hit;
+    // Имя ищем в той же строке, затем в предыдущей (карточка «Имя → должность»), затем в следующей.
+    const names = namesIn(chunks[i]).length ? namesIn(chunks[i]) : namesIn(chunks[i - 1]).length ? namesIn(chunks[i - 1]) : namesIn(chunks[i + 1]);
+    for (const name of names.slice(0, 2)) if (!people.some(p => p.name === name)) people.push({ name, role, priority: prio, context: chunks[i].slice(0, 160) });
+  }
+  return people.sort((a, b) => b.priority - a.priority).slice(0, 6);
+}
+
 /** Публичная веб-версия канала: https://t.me/s/<name>. Возвращает последние посты. */
 export function parseTelegramChannel(html = '') {
+  html = String(html).slice(0, 1_000_000);
   const posts = [...String(html).matchAll(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g)].map(m => stripHtml(m[1])).filter(t => t.length > 20);
   const title = stripHtml((String(html).match(/<div class="tgme_channel_info_header_title[^"]*"[^>]*>([\s\S]*?)<\/div>/) || [])[1] || '');
   const subs = (String(html).match(/([\d\s.,KkMm]+)\s*(?:subscribers|подписчик)/) || [])[1] || '';

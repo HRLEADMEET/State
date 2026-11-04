@@ -27,9 +27,11 @@ const SUBJECTS = {
 
 function fill(tpl, v) { return tpl.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? ''); }
 
-function chooseProof(lead, seed, casesOnly = false) {
+function chooseProof(lead, seed, casesOnly = false, proofs = PROOFS) {
   const niche = lead.industry || 'sales';
-  const pool = casesOnly ? PROOFS.filter(p => p.isCase) : PROOFS;
+  const all = proofs && proofs.length ? proofs : null;
+  if (!all) return { id: 'none', short: 'опыт в похожих задачах', text: 'мы решали похожие задачи — расскажу на созвоне', niche: ['all'] };
+  const pool = casesOnly && all.some(p => p.isCase) ? all.filter(p => p.isCase) : all;
   const fit = pool.filter(p => p.niche.includes(niche) || p.niche.includes('all') || p.niche.includes('sales'));
   return pick(fit.length ? fit : pool, seed);
 }
@@ -37,7 +39,7 @@ function chooseProof(lead, seed, casesOnly = false) {
 function roleOf(lead) { return roleAcc(lead.vacancy?.title || ''); }
 
 /** Основная функция: черновик касания. */
-export function draftMessage({ lead, me = {}, hook = 'vacancy', channel = 'email', offer, seed, variant } = {}) {
+export function draftMessage({ lead, me = {}, hook = 'vacancy', channel = 'email', offer, seed, variant, proofs = PROOFS } = {}) {
   const s = seed ?? (lead.id || '') + hook + channel;
   const ownerStyle = lead.owner?.style;
   const formal = !ownerStyle || ownerStyle.formality !== 'ty';
@@ -45,7 +47,7 @@ export function draftMessage({ lead, me = {}, hook = 'vacancy', channel = 'email
   const hello = name ? (formal ? `${name}, добрый день.` : `${name}, привет.`) : (formal ? 'Добрый день.' : 'Привет.');
   const company = lead.company || 'вашей компании';
   const role = roleOf(lead);
-  const proof = chooseProof(lead, s, hook === 'case' || hook === 'vacancy');
+  const proof = chooseProof(lead, s, hook === 'case' || hook === 'vacancy', proofs);
   const facts = (lead.facts || []).filter(f => f.text);
   const siteFacts = facts.filter(f => f.kind?.startsWith('site'));
   const of = offer || DEFAULT_OFFERS.find(o => o.id === (lead.hypotheses?.[0]?.offerId)) || DEFAULT_OFFERS[0];
@@ -74,8 +76,8 @@ export function draftMessage({ lead, me = {}, hook = 'vacancy', channel = 'email
     case 'inaction': {
       const c = lead.inaction || {};
       const n = c.managers || 3;
-      const cpm = PROOFS.find(p => p.id === 'cpm');
-      used.proof = 'cpm';
+      const cpm = (proofs || []).find(p => p.id === 'cpm') || proof;
+      used.proof = cpm.id;
       lines.push(`Посчитал по открытым данным: пока нет ${role}, ${company} недобирает примерно ${fmtRub(c.lostPerMonthRub || 450000)} в месяц.`);
       lines.push(`Расчёт грубый: ${n} ${plural(n, 'менеджер', 'менеджера', 'менеджеров')} × план × 25% недоработки без руководителя. Ошибка найма на такую позицию — ещё около ${fmtRub(c.badHireRiskRub || 450000)}.`);
       lines.push(`Я считаю цену результата, а не «стоимость подбора»: у меня ${cpm.text}.`);
@@ -121,10 +123,10 @@ export function draftMessage({ lead, me = {}, hook = 'vacancy', channel = 'email
 }
 
 /** Дожимы: короткие, по одному на 3-й и 7-й день, без давления. */
-export function followUp({ lead, step = 1, channel = 'email', me = {} }) {
+export function followUp({ lead, step = 1, channel = 'email', me = {}, proofs = PROOFS }) {
   const formal = lead.owner?.style?.formality !== 'ty';
   const name = addressName(lead.owner?.name || '', formal);
-  const proof = chooseProof(lead, (lead.id || '') + 'fu' + step);
+  const proof = chooseProof(lead, (lead.id || '') + 'fu' + step, false, proofs);
   const texts = {
     1: `${name ? name + ', ' : ''}поднимаю письмо — вдруг утонуло. Если коротко: могу за 30 минут показать, где у ${lead.company || 'вас'} теряются лиды. Есть смысл созвониться?`,
     2: `${name ? name + ', ' : ''}последнее сообщение, чтобы не надоедать. Оставлю кейс: ${proof.text}. Если станет актуально — просто ответьте на это письмо.`,

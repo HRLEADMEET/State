@@ -4,7 +4,8 @@
 import { OWNER_HIRED_ROLES } from './catalog.js';
 import { stripHtml, daysBetween } from './util.js';
 import { vacancyCost } from './economics.js';
-import { roleAcc } from './ru.js';
+import { roleAcc, plural } from './ru.js';
+import { vacancyFlags } from './hhPlaybook.js';
 
 /** Нормализует вакансию из ответа api.hh.ru (/vacancies и /vacancies/{id}). */
 export function normalizeVacancy(v = {}) {
@@ -48,11 +49,21 @@ const PAIN_MARKERS = [
   { re: /холодн|исходящ|outbound/, pain: 'Нужны исходящие продажи — а это система, а не «сильный продажник».', offer: 'setup' },
 ];
 
+export const DEFAULT_FILTERS = {
+  minSalary: 120000,
+  coreKeywords: ['банкрот', 'бфл', 'списание долг', 'юридическ', 'онлайн-школ', 'b2b'],
+  competitors: ['busywin', 'талантлинк', 'акулы', 'rentrop', 'рентроп', 'аренда роп'],
+  stopNiches: ['недвижим'],
+};
+
 /** 0..100: вероятность, что отбор ведёт собственник лично и что у компании есть бюджет на чек ≥ 200 000 ₽. */
-export function scoreVacancy(nv, { minSalaryRub = 120000 } = {}) {
+export function scoreVacancy(nv, opts = {}) {
+  const f = { ...DEFAULT_FILTERS, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v != null && v !== '')) };
+  const minSalaryRub = Number(f.minSalaryRub || f.minSalary) || 120000;
   const text = (nv.title + ' ' + nv.snippet + ' ' + nv.description).toLowerCase();
   const title = nv.title.toLowerCase();
-  let score = 0; const reasons = [];
+  const emp = (nv.employerName || '').toLowerCase();
+  let score = 0; const reasons = []; const stops = [];
   const role = OWNER_HIRED_ROLES.find(r => title.includes(r));
   if (role) { score += 35; reasons.push(`Топ-позиция «${role}» — отбирает первое лицо`); }
   for (const [m, w] of OWNER_MARKERS) if (text.includes(m)) { score += w * 3; reasons.push(`В тексте: «${m}»`); }
@@ -65,10 +76,20 @@ export function scoreVacancy(nv, { minSalaryRub = 120000 } = {}) {
     const d = daysBetween(nv.publishedAt);
     if (d >= 21) { score += 8; reasons.push(`Вакансия висит ${d} дн. — закрыть не получается`); }
   }
-  if (/кадров|агентств|рекрут|hr-агент/.test((nv.employerName || '').toLowerCase())) { score -= 40; reasons.push('Похоже на кадровое агентство — не собственник'); }
-  if (/сбер|втб|газпром|мтс|яндекс|ozon|wildberries|лукойл|ростелеком|x5|магнит/.test((nv.employerName || '').toLowerCase())) { score -= 30; reasons.push('Корпорация — собственник не участвует в найме'); }
+  if (/кадров|агентств|рекрут|hr-агент/.test(emp)) { score -= 40; reasons.push('Похоже на кадровое агентство — не собственник'); }
+  if (/сбер|втб|газпром|мтс|яндекс|ozon|wildberries|лукойл|ростелеком|x5|магнит/.test(emp)) { score -= 30; reasons.push('Корпорация — собственник не участвует в найме'); }
+  if ((f.coreKeywords || []).some(k => k && text.includes(String(k).toLowerCase()))) { score += 10; reasons.push('Ниша из ядра'); }
+  if (/удал[её]нн|удал[её]нка|гпх|самозанят|\bип\b|проектн/.test(text)) { score += 8; reasons.push('Можно проектно или удалённо'); }
+  if (/(менеджер по продажам|оператор|специалист по продажам|sales manager)/.test(title) && !/(руковод|директор|роп|head|начальник)/.test(title)) { score -= 25; reasons.push('Линейная роль, не руководитель'); }
+  if (/федеральн|сеть из \d+|\d+\s+филиал|департамент продаж|несколько роп/.test(text)) { score -= 15; reasons.push('Крупная сеть или департамент — решает не собственник'); }
+  const comp = (f.competitors || []).find(k => k && (emp.includes(String(k).toLowerCase()) || text.includes(String(k).toLowerCase())));
+  if (comp) stops.push('Прямой конкурент — смотрим как рынок, не откликаемся');
+  const niche = (f.stopNiches || []).find(k => k && text.includes(String(k).toLowerCase()));
+  if (niche) stops.push(`Ниша «${niche}…» в стоп-листе`);
+  if (nv.salaryRub && nv.salaryRub < minSalaryRub) stops.push(`Зарплата ниже ${minSalaryRub.toLocaleString('ru-RU')} ₽`);
+  if (stops.length) { score = Math.min(score, 10); reasons.unshift(...stops.map(x => 'Стоп: ' + x)); }
   score = Math.max(0, Math.min(100, score));
-  return { score, reasons, role: role || null };
+  return { score, reasons, role: role || null, stops, scoring10: Math.round(score / 10) };
 }
 
 export function painHypotheses(nv) {
@@ -91,7 +112,7 @@ export function vacancyFacts(nv) {
   const req = nv.description.match(/(построить|выстроить|создать)[^.]{0,80}/i);
   if (req) facts.push({ kind: 'task', text: `задача в вакансии — «${req[0].trim()}»`, source: nv.url || 'hh.ru' });
   const team = nv.description.match(/(\d{1,2})\s*(менеджер[а-я]*)/i);
-  if (team) facts.push({ kind: 'team', text: `в отделе продаж ${team[1]} ${team[2]}`, source: nv.url || 'hh.ru', n: Math.min(10, +team[1]) });
+  if (team) facts.push({ kind: 'team', text: `в отделе продаж ${team[1]} ${plural(+team[1], 'менеджер', 'менеджера', 'менеджеров')}`, source: nv.url || 'hh.ru', n: Math.min(10, +team[1]) });
   const size = nv.description.match(/(\d{2,4})\s*(человек|сотрудник[а-я]*)/i);
   if (size) facts.push({ kind: 'size', text: `в компании ${size[1]} ${size[2]}`, source: nv.url || 'hh.ru' });
   return facts;
@@ -100,8 +121,9 @@ export function vacancyFacts(nv) {
 /** Из вакансии — сразу в лид: компания, факты, гипотезы, оценка «цены бездействия». */
 export function vacancyToLead(raw, opts = {}) {
   const nv = normalizeVacancy(raw);
-  const s = scoreVacancy(nv, opts);
+  const s = scoreVacancy(nv, opts.filters || opts);
   const facts = vacancyFacts(nv);
+  const flags = vacancyFlags(nv.description + ' ' + nv.snippet);
   const team = facts.find(f => f.kind === 'team')?.n || 3;
   const age = facts.find(f => f.kind === 'vacancy_age')?.days || 30;
   const cost = vacancyCost({ daysOpen: Math.max(age, 14), salaryRub: nv.salaryRub || 150000, managers: team });
@@ -115,6 +137,8 @@ export function vacancyToLead(raw, opts = {}) {
     vacancy: nv,
     score: s.score,
     scoreReasons: s.reasons,
+    stops: s.stops,
+    flags,
     facts,
     hypotheses: painHypotheses(nv),
     inaction: cost,

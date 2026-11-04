@@ -85,3 +85,8 @@ export const MOCK_TRANSCRIPT = `Влад: Дмитрий, спасибо, что
 Дмитрий: Договорились.`;
 
 export const MOCK_REPLY_DMITRY = 'Влад, добрый. Да, актуально, прям в точку. Давайте созвонимся в четверг в 11:00?';
+
+export const MOCK_TEAM = {
+  'https://technoservice-pro.example': `<h2>Команда</h2><div>Орлов Дмитрий Сергеевич</div><div>Основатель и генеральный директор</div><div>Анна Белова</div><div>Руководитель сервисной службы</div>`,
+  'https://codelab.example': `<h2>О нас</h2><p>Алексей Ким — CEO и основатель студии</p>`,
+};

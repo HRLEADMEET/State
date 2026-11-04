@@ -4,6 +4,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 import crypto from 'node:crypto';
 import os from 'node:os';
+import { isEmail } from '../../core/util.js';
 
 function encodeHeader(s) {
   return /^[\x20-\x7e]*$/.test(s) ? s : '=?UTF-8?B?' + Buffer.from(s, 'utf8').toString('base64') + '?=';
@@ -14,7 +15,15 @@ function encodeAddress(a) {
 }
 const bare = (a) => (String(a).match(/<([^>]+)>/) || [null, a])[1].trim();
 
+function assertHeaderSafe(name, v) {
+  if (v != null && /[\r\n\0]/.test(String(v))) throw new Error(`Недопустимые символы в поле ${name}`);
+}
+
 export function buildMessage({ from, to, subject, text, replyTo, unsubscribe, messageId, inReplyTo }) {
+  for (const [k, v] of Object.entries({ from, to, replyTo, unsubscribe, messageId, inReplyTo })) assertHeaderSafe(k, v);
+  if (!isEmail(bare(to))) throw new Error('Некорректный адрес получателя');
+  if (!isEmail(bare(from))) throw new Error('Некорректный адрес отправителя');
+  subject = String(subject || '').replace(/[\r\n]+/g, ' ');
   const domain = bare(from).split('@')[1] || os.hostname();
   const id = messageId || `<${crypto.randomUUID()}@${domain}>`;
   const headers = [

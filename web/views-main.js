@@ -2,6 +2,8 @@
 import { S, call, act, go, leadHash, scriptHash, stageName, hookName, offers, refreshBoot } from './state.js';
 import { esc, icon, money, usd, toast, modal, hint, copy, fmtDate, ago, formData, scoreRing, pct, $, $$ } from './ui.js';
 import { checkMessage } from '../core/quality.js';
+import { safeUrl } from '../core/util.js';
+import { playbookCard, crmCard, bindCrm, autopilotCard, bindAutopilot } from './views-flow.js';
 
 const stagePill = (st) => `<span class="pill st-${st}">${esc(stageName(st))}</span>`;
 const CHANNEL_NAMES = { email: 'Email', telegram: 'Telegram', whatsapp: 'WhatsApp', zalo: 'Zalo', hh_chat: 'Чат hh.ru' };
@@ -22,7 +24,7 @@ export async function viewDashboard(el) {
   const f = a.funnel; const top = Math.max(1, f[0].n);
   el.innerHTML = `
     <div class="page-head"><div><h1>Пульт</h1><p>Что сделать сейчас, чтобы дойти до встречи. Деньги — в рублях и в долларах по курсу ${esc(String(a.usdRate))} ₽.</p></div>
-      <div class="row"><a class="btn primary" href="#signals" data-tour="find-signals">${icon('radar')}Найти собственников</a></div></div>
+      <div class="row"><a class="btn" href="#queue">${icon('send')}Конвейер</a><a class="btn primary" href="#signals" data-tour="find-signals">${icon('radar')}Найти собственников</a></div></div>
     <div class="grid g4" data-tour="kpis">
       <div class="card kpi"><span class="label">Выручка ${hint('Сумма выигранных сделок. В скобках — в долларах по курсу из Настроек.')}</span><b>${money(a.revenueRub, { usd: false })}</b><span class="usd">${usd(a.revenueRub)}</span></div>
       <div class="card kpi"><span class="label">В работе</span><b>${money(a.pipelineRub, { usd: false })}</b><span class="usd">открытые сделки</span></div>
@@ -35,11 +37,13 @@ export async function viewDashboard(el) {
       <div class="stack">
         <div class="card" data-tour="funnel"><div class="card-head"><h3>Воронка</h3><span class="xs mute">конверсия из предыдущего этапа</span></div>
           <div class="funnel">${f.map((s, i) => `<div class="funnel-row st-${s.stage}"><span>${esc(s.name)}</span><div class="track"><i style="width:${(s.n / top) * 100}%"></i></div><b>${s.n}</b><span class="conv">${i ? pct(f[i - 1].n ? (s.n / f[i - 1].n) * 100 : 0) : ''}</span></div>`).join('')}</div></div>
+        <div id="ap-box"></div>
         ${leader ? `<div class="card"><div class="card-head"><h3>A/B: ${esc(leader.name)}</h3><a class="btn sm ghost" href="#experiments">Подробнее</a></div>
           <div class="list">${leader.stats.rows.map(r => `<div class="item"><div class="body"><div class="title">${esc(r.name)} <span class="mute small">· ${esc(hookName(r.hook))}</span></div><div class="bar ${r.id === leader.stats.leader ? 'ok' : ''}" style="margin-top:6px"><i style="width:${r.pBest}%"></i></div></div><div class="small num" style="text-align:right">${pct(r.rate)}<br><span class="mute xs">лучший с P=${pct(r.pBest)}</span></div></div>`).join('')}</div>
           <p class="xs mute">${leader.stats.winner ? 'Победитель определён — масштабируйте этот заход.' : `Нужно ещё ${leader.stats.moreTouchesNeeded} касаний на вариант для уверенного вывода.`}</p></div>` : ''}
       </div>
     </div>`;
+  if (S.boot.role === 'owner') { const box = $('#ap-box'); box.innerHTML = await autopilotCard(); bindAutopilot(box); }
 }
 
 // ====================== СИГНАЛЫ HH ======================
@@ -71,7 +75,9 @@ export async function viewSignals(el) {
         <li>Заявки с рекламы (Директ, VK, TikTok, Instagram) — через вебхук в разделе «Каналы».</li>
         <li>Любой сайт: виджет-форма отправляет заявку сюда с utm-метками.</li></ul>
         <a class="btn sm" href="#channels">Подключить каналы</a></div>
-    </div>`;
+    </div>
+    ${crmCard()}`;
+  bindCrm(el);
   $('#hh-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = formData(e.target);
@@ -96,7 +102,7 @@ function renderHhResults(r, niche) {
     ${r.errors?.length ? `<p class="small" style="color:var(--bad)">${r.errors.map(esc).join('<br>')}</p>` : ''}
     <div class="table-wrap"><table><thead><tr><th></th><th>Оценка</th><th>Компания и вакансия</th><th class="n">Доход до</th><th>Почему</th></tr></thead><tbody>
     ${r.items.map((x, i) => `<tr><td><input type="checkbox" id="hh-c${i}" data-i="${i}" ${x.preview.imported ? 'disabled' : 'checked'}></td><td>${scoreRing(x.preview.score)}</td>
-      <td><b>${esc(x.preview.company)}</b><br><a href="${esc(x.preview.url)}" target="_blank" rel="noopener">${esc(x.preview.title)}</a><div class="xs mute">${esc(x.preview.area || '')}${x.preview.imported ? ' · уже в лидах' : ''}</div></td>
+      <td><b>${esc(x.preview.company)}</b><br>${safeUrl(x.preview.url) ? `<a href="${esc(safeUrl(x.preview.url))}" target="_blank" rel="noopener">${esc(x.preview.title)}</a>` : esc(x.preview.title)}<div class="xs mute">${esc(x.preview.area || '')}${x.preview.imported ? ' · уже в лидах' : ''}</div></td>
       <td class="n">${x.preview.salary ? money(x.preview.salary) : '—'}</td><td class="small">${x.preview.reasons.slice(0, 3).map(esc).join('<br>')}</td></tr>`).join('') || '<tr><td colspan="5" class="mute">Ничего не найдено — расширьте регион или снизьте порог.</td></tr>'}
     </tbody></table></div></div>`;
   $('#hh-all')?.addEventListener('click', () => $$('#hh-results input[type=checkbox]:not([disabled])').forEach(c => { c.checked = true; }));
@@ -155,14 +161,14 @@ export async function viewLead(el, id) {
       <div class="stack">
         <div class="card" data-tour="profile"><div class="card-head"><h3>Профиль</h3><button class="btn sm ghost" id="btn-edit">Изменить</button></div>
           <div class="small stack" style="gap:6px">
-            ${lead.vacancy?.title ? `<div><span class="label">Сигнал</span><br><a href="${esc(lead.vacancy.url)}" target="_blank" rel="noopener">${esc(lead.vacancy.title)}</a>${lead.vacancy.salaryRub ? ' · до ' + money(lead.vacancy.salaryRub) : ''}</div>` : ''}
-            ${lead.site ? `<div><span class="label">Сайт</span><br><a href="${esc(lead.site)}" target="_blank" rel="noopener">${esc(lead.site)}</a></div>` : ''}
+            ${lead.vacancy?.title ? `<div><span class="label">Сигнал</span><br>${safeUrl(lead.vacancy.url) ? `<a href="${esc(safeUrl(lead.vacancy.url))}" target="_blank" rel="noopener">${esc(lead.vacancy.title)}</a>` : esc(lead.vacancy.title)}${lead.vacancy.salaryRub ? ' · до ' + money(lead.vacancy.salaryRub) : ''}</div>` : ''}
+            ${safeUrl(lead.site) ? `<div><span class="label">Сайт</span><br><a href="${esc(safeUrl(lead.site))}" target="_blank" rel="noopener">${esc(lead.site)}</a></div>` : ''}
             <div><span class="label">Контакты</span><br>${[lead.contacts?.ownerEmail, ...(lead.contacts?.emails || []), ...(lead.contacts?.phones || [])].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).map(esc).join(' · ') || '<span class="mute">нет — добавьте или запустите исследование</span>'}</div>
             ${social.length ? `<div><span class="label">Соцсети</span><br>${social.map(([k, v]) => `<span class="tag">${esc(k)}: ${esc(String(v).replace(/^https?:\/\//, ''))}</span>`).join(' ')}</div>` : ''}
             ${lead.scoreReasons?.length ? `<div><span class="label">Оценка ${lead.score}</span><br>${lead.scoreReasons.slice(0, 4).map(esc).join('<br>')}</div>` : ''}
           </div></div>
         <div class="card" data-tour="facts"><div class="card-head"><h3>Что я уже знаю о компании</h3>${hint('Факты из открытых источников с указанием источника. Генератор пишет только то, что здесь есть, и ничего не выдумывает.')}</div>
-          ${lead.facts?.length ? `<ul class="facts">${lead.facts.map(f => `<li><span>${esc(f.text)}${f.source && /^https?:/.test(f.source) ? ` <a class="xs" href="${esc(f.source)}" target="_blank" rel="noopener">источник</a>` : ''}</span></li>`).join('')}</ul>` : '<p class="mute small">Фактов пока нет. Нажмите «Исследовать»: система прочитает сайт и публичный Telegram-канал собственника.</p>'}
+          ${lead.facts?.length ? `<ul class="facts">${lead.facts.map(f => `<li><span>${esc(f.text)}${/^https?:/i.test(f.source || '') && safeUrl(f.source) ? ` <a class="xs" href="${esc(safeUrl(f.source))}" target="_blank" rel="noopener">источник</a>` : ''}</span></li>`).join('')}</ul>` : '<p class="mute small">Фактов пока нет. Нажмите «Исследовать»: система прочитает сайт и публичный Telegram-канал собственника.</p>'}
           <div><span class="label">Гипотезы боли</span><ul class="facts" style="margin-top:6px">${(lead.hypotheses || []).map(h => `<li>${esc(h.pain)} <span class="tag brand">${esc(offers().find(o => o.id === h.offerId)?.name || h.offerId)}</span></li>`).join('')}</ul></div>
           ${lead.inaction ? `<div class="small"><span class="label">Цена бездействия (оценка)</span><br>${money(lead.inaction.lostPerMonthRub)} в месяц недобора · ошибка найма ≈ ${money(lead.inaction.badHireRiskRub)}</div>` : ''}
         </div>
@@ -183,6 +189,7 @@ export async function viewLead(el, id) {
             ${sentCount ? '<button class="btn sm" id="btn-fu1">Дожим №1</button><button class="btn sm" id="btn-fu2">Дожим №2</button>' : ''}</div>
           <div id="draft-box"></div>
         </div>
+        <div id="pb-box">${lead.vacancy?.title || lead.source === 'hh' ? '<div class="card mute small">Загружаю HH-плейбук…</div>' : ''}</div>
         <div class="card" data-tour="reply"><div class="card-head"><h3>Пришёл ответ</h3>${hint('Вставьте ответ собственника. Система определит тип (готов к встрече, вопрос, цена, позже, отказ) и подскажет ответ. Отписка блокирует дальнейшие касания.')}</div>
           <textarea id="reply-text" rows="3" placeholder="Например: «Да, актуально. Давайте в четверг в 11:00?»"></textarea>
           <div class="row"><button class="btn" id="btn-reply">Разобрать ответ</button></div><div id="reply-box"></div></div>
@@ -230,6 +237,7 @@ export async function viewLead(el, id) {
   $('#btn-call').addEventListener('click', () => uploadCallModal({ leadId: id, meetingId: meetings.find(m => m.status === 'scheduled')?.id }));
   $('#btn-deal').addEventListener('click', () => dealModal(lead));
   $$('[data-deal-won]').forEach(b => b.addEventListener('click', async () => { await act(() => call('PUT', '/deals/' + b.dataset.dealWon, { status: 'won' }), 'Сделка выиграна'); S.render(); }));
+  if (lead.vacancy?.title || lead.source === 'hh') playbookCard(lead, $('#pb-box')).catch(e => { $('#pb-box').innerHTML = `<div class="card small mute">${esc(e.message)}</div>`; });
 }
 
 function updateCredits() { call('GET', '/bootstrap').then(b => { const c = $('#credit-count'); if (c) c.textContent = b.ws.credits; }).catch(() => {}); }

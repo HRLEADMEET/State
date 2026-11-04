@@ -137,10 +137,42 @@ export async function viewPrefs(el) {
       <label class="switch"><input type="checkbox" id="s-wd" name="weekdaysOnly" ${s.sending.weekdaysOnly ? 'checked' : ''}> Только будни</label>
       <p class="xs mute">Обязательно до первой рассылки: свой домен, SPF, DKIM и DMARC; ящик на имя человека; plain-text без вложений. Подробно — в docs/DELIVERABILITY.md.</p>
       <div class="row"><button class="btn primary" type="submit">Сохранить</button></div></form>
+    <form class="card" id="p-auto" data-tour="prefs-auto"><div class="card-head"><h3>Автопилот, время и лимиты</h3>${hint('Автопилот утром готовит касания и пишет вам фокус дня в Telegram-бот, вечером закрывает молчащих (правило «нет ответа N дней = отказ») и присылает итог. Лимиты в день берегут аккаунты от блокировок.')}</div>
+      <label class="switch"><input type="checkbox" id="a-on" name="enabled" ${s.autopilot?.enabled ? 'checked' : ''}> Автопилот включён</label>
+      <div class="form-grid">
+        ${num('morningHour', 'Утренний запуск, ч', s.autopilot?.morningHour ?? 8)}${num('eveningHour', 'Вечерний разбор, ч', s.autopilot?.eveningHour ?? 20)}${num('dailyNew', 'Новых лидов с hh в день', s.autopilot?.dailyNew ?? 20)}${num('prepare', 'Готовить касаний в день', s.autopilot?.prepare ?? 20)}${num('minScore', 'Мин. оценка вакансии', s.autopilot?.minScore ?? 45)}${num('noReplyDays', 'Нет ответа N дней = отказ', s.autopilot?.noReplyDays ?? 3)}
+        <label class="field"><span>Ваш часовой пояс</span><input id="a-tz" name="tzMine" value="${esc(s.tz?.mine || 'Asia/Ho_Chi_Minh')}"></label>
+        <label class="field"><span>Пояс клиентов</span><input id="a-tzc" name="tzClients" value="${esc(s.tz?.clients || 'Europe/Moscow')}"></label>
+        ${['telegram', 'whatsapp', 'zalo', 'hh_apply', 'hh_chat'].map(k => num('cap_' + k, 'Лимит в день: ' + ({ telegram: 'Telegram', whatsapp: 'WhatsApp', zalo: 'Zalo', hh_apply: 'отклики hh', hh_chat: 'чат hh' })[k], s.caps?.[k] ?? '')).join('')}
+      </div>
+      <label class="switch"><input type="checkbox" id="a-res" name="autoResearch" ${s.autopilot?.autoResearch !== false ? 'checked' : ''}> Исследовать компании автоматически (1 кредит за лида)</label>
+      <div class="row"><button class="btn primary" type="submit">Сохранить</button></div></form>
+    <form class="card" id="p-hh" data-tour="prefs-hh"><div class="card-head"><h3>Фильтры hh.ru и ваш отклик</h3>${hint('Стоп-факторы из вашей CRM: конкуренты, ниши без трафика, зарплата ниже порога. Ваш текст отклика хранится только в вашей базе. Подстановки: [должность], [компания].')}</div>
+      <div class="form-grid">
+        <label class="field"><span>Ниши ядра</span><input id="h-core" name="coreKeywords" value="${esc((s.hh.coreKeywords || []).join(', '))}"></label>
+        <label class="field"><span>Стоп-ниши</span><input id="h-stop" name="stopNiches" value="${esc((s.hh.stopNiches || []).join(', '))}"></label>
+        <label class="field"><span>Конкуренты</span><input id="h-comp" name="competitors" value="${esc((s.hh.competitors || []).join(', '))}"></label>
+        <label class="field"><span>Мин. зарплата, ₽</span><input type="number" id="h-min" name="minSalary" value="${s.hh.minSalary ?? 120000}"></label>
+        <label class="field"><span>ID резюме для откликов</span><input id="h-res" name="resumeId" value="${esc(s.hh.resumeId || '')}"></label>
+      </div>
+      <label class="field"><span>Ваш текст отклика (пусто — честный шаблон системы)</span><textarea id="h-letter" name="hhLetter" rows="5" placeholder="Здравствуйте! Откликаюсь на вакансию [должность]...">${esc(s.playbook?.hhLetter || '')}</textarea></label>
+      <div class="row"><button class="btn primary" type="submit">Сохранить</button></div></form>
     <div class="card"><h3>Демо и обучение</h3><div class="row"><button class="btn" id="p-tour">Пройти обучение заново</button>${S.api.mode === 'demo' ? '<button class="btn danger" id="p-reset">Сбросить демо-данные</button>' : ''}</div></div>`;
   $('#p-me').addEventListener('submit', async (e) => { e.preventDefault(); const f = formData(e.target); await act(() => call('PUT', '/settings', { me: { name: f.name, title: f.title, telegram: f.telegram, email: f.email, signature: f.signature, mySample: f.mySample }, usdRate: Number(f.usdRate) || 92 }), 'Сохранено'); await refreshBoot(); S.render(); });
   $('#p-offers').addEventListener('submit', async (e) => { e.preventDefault(); const os = structuredClone(s.offers); $$('#p-offers [data-o]').forEach(i => { os[+i.dataset.o][i.dataset.k] = i.dataset.k === 'priceRub' ? Number(i.value) || 0 : i.value; }); await act(() => call('PUT', '/settings', { offers: os }), 'Офферы сохранены'); await refreshBoot(); });
   $('#p-send').addEventListener('submit', async (e) => { e.preventDefault(); const f = formData(e.target); await act(() => call('PUT', '/settings', { sending: f }), 'Правила отправки сохранены'); });
+  const csv = (v) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+  $('#p-auto').addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = formData(e.target);
+    const caps = {}; for (const k of ['telegram', 'whatsapp', 'zalo', 'hh_apply', 'hh_chat']) if (f['cap_' + k] !== '' && f['cap_' + k] != null) caps[k] = Number(f['cap_' + k]);
+    await act(() => call('PUT', '/settings', { autopilot: { enabled: f.enabled, morningHour: f.morningHour, eveningHour: f.eveningHour, dailyNew: f.dailyNew, prepare: f.prepare, minScore: f.minScore, noReplyDays: f.noReplyDays, autoResearch: f.autoResearch }, tz: { mine: f.tzMine, clients: f.tzClients }, caps }), 'Автопилот и лимиты сохранены');
+    await refreshBoot();
+  });
+  $('#p-hh').addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = formData(e.target);
+    await act(() => call('PUT', '/settings', { hh: { coreKeywords: csv(f.coreKeywords), stopNiches: csv(f.stopNiches), competitors: csv(f.competitors), minSalary: Number(f.minSalary) || 0, resumeId: f.resumeId }, playbook: { hhLetter: f.hhLetter } }), 'Фильтры и отклик сохранены');
+    await refreshBoot();
+  });
   $('#p-fx')?.addEventListener('click', async () => { const r = await act(() => call('GET', '/fx')); if (r) { $('#p-usd').value = r.usdRate; toast('Курс ЦБ: ' + r.usdRate + ' ₽'); } });
   $('#p-tour').addEventListener('click', async () => { const { startTour } = await import('./tour.js'); startTour(); });
   $('#p-reset')?.addEventListener('click', async () => { const { ask } = await import('./ui.js'); if (await ask('Сбросить все демо-данные и заново построить тестовую воронку?', { ok: 'Сбросить', danger: true })) { await S.api.reset(); location.hash = '#dashboard'; location.reload(); } });

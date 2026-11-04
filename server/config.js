@@ -24,6 +24,7 @@ export const config = {
   baseUrl: (env.BASE_URL || `http://localhost:${env.PORT || 8787}`).replace(/\/$/, ''),
   dataDir: path.resolve(env.DATA_DIR || path.join(ROOT, 'data')),
   demoMode: env.DEMO_MODE === 'true',
+  trustProxy: env.TRUST_PROXY === 'true',
   allowSignup: env.ALLOW_SIGNUP === 'true',
   secureCookies: env.SECURE_COOKIES === 'true' || (env.BASE_URL || '').startsWith('https://'),
   sessionDays: Number(env.SESSION_DAYS || 14),

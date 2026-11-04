@@ -149,3 +149,19 @@ test('SMTP: письмо собирается корректно (UTF-8, отп�
   assert.match(m.raw, /Content-Type: text\/plain; charset=UTF-8/);
   assert.match(m.messageId, /@leadmeet\.ru>$/);
 });
+
+test('SSRF: внутренние адреса и обходы запрещены', async () => {
+  const { isBlockedIp, checkUrl, fetchText } = await import('../server/services/web.js');
+  for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.0.1', '169.254.169.254', '::1', '::ffff:127.0.0.1', '::ffff:7f00:1', 'fd00::1', '0.0.0.0', '100.64.0.1']) assert.equal(isBlockedIp(ip), true, ip);
+  assert.equal(isBlockedIp('8.8.8.8'), false);
+  for (const u of ['http://localhost/', 'http://127.0.0.1/', 'http://[::1]/', 'http://2130706433/', 'http://0x7f.0.0.1/', 'file:///etc/passwd', 'ftp://x.ru/', 'http://user:pass@example.com/', 'http://example.com:22/']) assert.throws(() => checkUrl(u), /запрещ|Разрешены|Некорректный/i, u);
+  await assert.rejects(fetchText('http://127.0.0.1:' + new URL(base).port + '/healthz'), /запрещ/i);
+});
+
+test('SMTP: инъекция заголовков и команд через адрес отклоняется', async () => {
+  const { buildMessage } = await import('../server/services/smtp.js');
+  assert.throws(() => buildMessage({ from: 'a@b.ru', to: 'x@y.ru\r\nBcc: victim@z.ru', subject: 's', text: 't' }), /Недопустимые|Некорректный/);
+  assert.throws(() => buildMessage({ from: 'a@b.ru', to: 'not-an-email', subject: 's', text: 't' }), /Некорректный/);
+  const m = buildMessage({ from: 'a@b.ru', to: 'x@y.ru', subject: 'тема\r\nBcc: v@z.ru', text: 't' });
+  assert.doesNotMatch(m.raw, /^Bcc:/m);
+});

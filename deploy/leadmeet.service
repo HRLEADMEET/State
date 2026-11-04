@@ -1,0 +1,20 @@
+# systemd-юнит для запуска без Docker: sudo cp deploy/leadmeet.service /etc/systemd/system/ && sudo systemctl enable --now leadmeet
+[Unit]
+Description=LEADMEET OS
+After=network.target
+
+[Service]
+Type=simple
+User=leadmeet
+WorkingDirectory=/opt/leadmeet
+EnvironmentFile=/opt/leadmeet/.env
+ExecStart=/usr/bin/node --no-warnings server/index.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

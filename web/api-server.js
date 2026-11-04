@@ -31,5 +31,11 @@ export function serverApi() {
     return fetch('/api/calls/audio?' + q, { method: 'POST', headers: { 'x-csrf': csrf(), 'content-type': file.type || 'audio/mpeg' }, body: file, credentials: 'same-origin' })
       .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Ошибка загрузки'); return j; });
   };
-  return { mode: 'server', call, auth, uploadAudio };
+  /** Сохранение файла (только серверная версия; в демо файл показывается в окне для копирования). */
+  const download = (filename, text, type = 'text/csv;charset=utf-8') => {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement('a'); a.href = url; a.download = filename; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+  return { mode: 'server', call, auth, uploadAudio, download };
 }

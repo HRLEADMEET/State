@@ -187,9 +187,8 @@ export function bindCrm(root) {
   root.querySelector('#crm-export')?.addEventListener('click', async () => {
     const r = await act(() => call('GET', '/crm/export'));
     if (!r) return;
-    if (S.api.mode === 'server') {
-      const url = URL.createObjectURL(new Blob([r.csv], { type: 'text/csv;charset=utf-8' }));
-      const a = document.createElement('a'); a.href = url; a.download = r.filename; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+    if (S.api.download) {
+      S.api.download(r.filename, r.csv);
     } else modal(`<h3>${esc(r.filename)}</h3><p class="small mute">Скопируйте содержимое и сохраните как .csv.</p><textarea class="tall mono" readonly>${esc(r.csv)}</textarea><div class="row"><button class="btn" id="crm-cp">${icon('copy')}Скопировать</button><button class="btn" data-close>Закрыть</button></div>`, { onMount(m) { m.querySelector('#crm-cp').addEventListener('click', () => copy(r.csv)); } });
   });
 }

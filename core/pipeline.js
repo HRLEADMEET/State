@@ -9,6 +9,7 @@ import { parseCsv, toCsv, rowsToLeads, leadsToRows } from './crmCsv.js';
 import { forecast, clientText } from './forecast.js';
 import { vacancyCost } from './economics.js';
 import { fmtRub } from './util.js';
+import { plural } from './ru.js';
 
 const DAY = 86400000;
 const stageIndex = (id) => STAGES.findIndex(s => s.id === id);
@@ -216,7 +217,7 @@ export function registerPipeline(R, H) {
     const queue = msgs.filter(m => m.status === 'approved').length;
     const mtToday = meetings.filter(m => m.status === 'scheduled' && String(m.at).startsWith(today)).length;
     report.summary = phase === 'morning'
-      ? `☀️ Фокус дня: в конвейере ${queue} касаний, ждут ответа ${waiting}, встреч сегодня ${mtToday}.`
+      ? `☀️ Фокус дня: в конвейере ${queue} ${plural(queue, 'касание', 'касания', 'касаний')}, ждут ответа ${waiting}, встреч сегодня ${mtToday}.`
       : `🌙 Итог дня: отправлено ${sent}, ответов ${replies}, ждут ответа ${waiting}, в конвейере на завтра ${queue}.`;
     report.summary += '\n' + report.steps.map(s => '• ' + s).join('\n');
     await put(ctx, 'runs', { id: uid('run_'), ...report });

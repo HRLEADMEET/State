@@ -1,0 +1,8 @@
+# Замените leads.example.ru на свой домен. Caddy сам получит и продлит HTTPS-сертификат.
+leads.example.ru {
+	encode gzip
+	reverse_proxy app:8787
+	request_body {
+		max_size 35MB
+	}
+}

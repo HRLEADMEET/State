@@ -38,6 +38,9 @@ function safeLookup(hostname, options, cb) {
 }
 
 export function checkUrl(raw) {
+  raw = String(raw || '').trim();
+  const scheme = raw.match(/^([a-z][a-z0-9+-]*):/i);
+  if (scheme && !/^https?$/i.test(scheme[1])) throw new Error('Разрешены только http/https');
   let u;
   try { u = new URL(/^https?:\/\//i.test(raw) ? raw : 'https://' + raw); } catch { throw new Error('Некорректный адрес'); }
   if (!['http:', 'https:'].includes(u.protocol)) throw new Error('Разрешены только http/https');

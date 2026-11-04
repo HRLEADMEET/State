@@ -59,7 +59,7 @@ export async function seedDemo(ctx) {
   const exp = await api('POST', '/experiments', {
     name: 'Первое касание собственнику: 3 захода', metric: 'meeting',
     hypothesis: 'Факты о компании + «задайте любой вопрос» дают больше встреч, чем зацепка за вакансию.',
-    variants: [{ id: 'A', name: 'Вакансия', hook: 'vacancy', offerId: 'audit' }, { id: 'B', name: 'Факты + вопрос', hook: 'facts', offerId: 'audit' }, { id: 'C', name: 'Ваc нашла система', hook: 'system', offerId: 'platform' }],
+    variants: [{ id: 'A', name: 'Вакансия', hook: 'vacancy', offerId: 'audit' }, { id: 'B', name: 'Факты + вопрос', hook: 'facts', offerId: 'audit' }, { id: 'C', name: 'Вас нашла система', hook: 'system', offerId: 'platform' }],
   });
 
   // 4) Первое касание Дмитрию: вариант B, письмо

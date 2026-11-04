@@ -15,12 +15,12 @@ export function round(n, d = 0) { const k = 10 ** d; return Math.round((Number(n
 
 export function fmtRub(n) {
   const v = Math.round(Number(n) || 0);
-  return v.toLocaleString('ru-RU').replace(/,/g, ' ') + ' ₽';
+  return v.toLocaleString('ru-RU').replace(/[\s,]/g, '\u00A0') + '\u00A0₽';
 }
 
 export function fmtUsd(n) {
   const v = Math.round(Number(n) || 0);
-  return '$' + v.toLocaleString('en-US');
+  return '$' + v.toLocaleString('en-US').replace(/,/g, '\u00A0');
 }
 
 /** "250 000 ₽ ($2 717)" — рубли и в скобках доллары, как просили. */

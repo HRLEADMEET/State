@@ -45,6 +45,12 @@ const UNSUB_KEY = crypto.createHmac('sha256', MASTER_KEY).update('unsubscribe-li
 const unsealKey = () => UNSUB_KEY;
 
 function services(ctx) {
+  // Демо-кабинет на сервере работает на вымышленных данных: hh.ru, сайты и почта имитируются.
+  if (config.demoMode && ctx.ws?.demo) return { ...realServices(ctx), ...mockServices(), llm };
+  return realServices(ctx);
+}
+
+function realServices(ctx) {
   return {
     hh, web: webService, llm,
     secrets: { seal: async (v) => seal(v) },
@@ -425,7 +431,7 @@ async function emailTick() {
 async function ensureDemo() {
   if (!config.demoMode || store.userByEmail('demo@leadmeet.local')) return;
   const user = store.createUser({ email: 'demo@leadmeet.local', name: 'Влад (демо)', pass: hashPassword(token(16)) });
-  const ws = store.createWorkspace({ name: 'LEADMEET · демо', kind: 'own', plan: 'agency', credits: 5000, ownerUserId: user.id });
+  const ws = store.createWorkspace({ name: 'LEADMEET · демо', kind: 'own', plan: 'agency', credits: 5000, ownerUserId: user.id, demo: true });
   const ctx = { store, ws, user, role: 'owner', services: mockServices(), audit: async (e) => store.audit(e) };
   await seedDemo(ctx);
   console.log('[demo] Демо-кабинет создан с тестовой воронкой.');

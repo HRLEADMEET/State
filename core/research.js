@@ -20,7 +20,7 @@ export function parseSite(html = '', url = '') {
   const h1 = [...h.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/gi)].map(m => stripHtml(m[1])).filter(Boolean).slice(0, 3);
   const h2 = [...h.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)].map(m => stripHtml(m[1])).filter(Boolean).slice(0, 8);
   const text = stripHtml(h);
-  const emails = [...new Set((h.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || []).filter(e => !/\.(png|jpg|svg|webp|gif)$/i.test(e) && !/example|sentry|wixpress|domain/i.test(e)))].slice(0, 5);
+  const emails = [...new Set((h.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || []).filter(e => !/\.(png|jpg|svg|webp|gif)$/i.test(e) && !/@(example\.(com|org|net)|domain\.|sentry|wixpress|email\.)/i.test(e)))].slice(0, 5);
   const phones = [...new Set((text.match(/(?:\+7|8)[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}/g) || []).map(p => p.replace(/[^\d+]/g, '').replace(/^8/, '+7')))].slice(0, 3);
   const social = {};
   for (const [k, re] of SOCIAL) {

@@ -1,7 +1,7 @@
 // Демо-воронка «от сигнала до сделки» — прогоняется через тот же API, что и реальная работа.
 // Это одновременно пример для обучения и сквозной тест всех этапов.
 import { handle } from './router.js';
-import { MOCK_VACANCIES, MOCK_EMPLOYERS, MOCK_SITES, MOCK_TELEGRAM, MOCK_TRANSCRIPT, MOCK_REPLY_DMITRY, MOCK_TEAM } from './mocks.js';
+import { MOCK_VACANCIES, MOCK_EMPLOYERS, MOCK_SITES, MOCK_TELEGRAM, MOCK_TRANSCRIPT, MOCK_REPLY_DMITRY, MOCK_TEAM, MOCK_ORGS, MOCK_SOURCE_VACANCIES } from './mocks.js';
 import { uid } from './util.js';
 import { HttpError } from './util.js';
 
@@ -45,6 +45,19 @@ export function mockServices(extra = {}) {
       async telegram(name) { if (MOCK_TELEGRAM[name]) return MOCK_TELEGRAM[name]; throw new Error('демо: канал не найден'); },
     },
     mail: { async send(ctx, m) { return { messageId: 'demo-' + uid() }; } },
+    sources: {
+      async trudvsem(ctx, { query }) { return { kind: 'vacancy', items: MOCK_SOURCE_VACANCIES.filter(v => !query || true) }; },
+      async hh_kz() { return { kind: 'vacancy', items: MOCK_SOURCE_VACANCIES.filter(v => v.area.name === 'Алматы') }; },
+      async superjob() { return { kind: 'vacancy', items: MOCK_SOURCE_VACANCIES.slice(0, 1) }; },
+      async twogis(ctx, { city }) { return { kind: 'org', items: MOCK_ORGS.filter(o => !city || o.city.toLowerCase().startsWith(String(city).toLowerCase().slice(0, 4))) }; },
+      async yandex_maps(ctx, { city }) { return { kind: 'org', items: MOCK_ORGS.filter(o => !city || o.city.toLowerCase().startsWith(String(city).toLowerCase().slice(0, 4))) }; },
+      async google_places() { return { kind: 'org', items: MOCK_ORGS.filter(o => o.city === 'Хошимин' || o.city === 'Дубай') }; },
+    },
+    dns: {
+      async recipientMx(domain) { return /nomail/.test(domain) ? 'no_mx' : 'ok'; },
+      async domainHealth(domain) { return { domain, ok: false, checks: [{ id: 'mx', ok: true, text: 'MX есть (демо)' }, { id: 'spf', ok: true, text: 'SPF: v=spf1 include:_spf.yandex.net ~all (демо)' }, { id: 'dmarc', ok: false, text: 'Нет DMARC — добавьте хотя бы p=none (демо)' }, { id: 'dkim', ok: null, text: 'Укажите DKIM-селектор (демо)' }] }; },
+    },
+    async metrika() { return { counter: 'демо', days: 30, rows: [{ source: 'hh', visits: 412, goals: 9 }, { source: 'harvey', visits: 138, goals: 6 }, { source: 'yandex_direct', visits: 2210, goals: 31 }], note: 'Демо-цифры Метрики.' }; },
     notify: async () => {},
     llm: { async available() { return false; } },
     ...extra,

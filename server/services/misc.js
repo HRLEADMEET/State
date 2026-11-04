@@ -1,5 +1,6 @@
-// Уведомления в Telegram (Bot API), транскрибация аудио, курс доллара ЦБ, OAuth-провайдеры.
+// Уведомления в Telegram (Bot API), транскрибация аудио, курсы ЦБ, Метрика, OAuth-провайдеры.
 import { config } from '../config.js';
+import { ratesFromCbr } from '../../core/currency.js';
 
 // ---------- Telegram bot ----------
 export async function telegramSend(botToken, chatId, text) {
@@ -40,6 +41,31 @@ export async function transcribe({ provider, key, url }, buffer, mime = 'audio/m
 
 // ---------- FX ----------
 let fxCache = { at: 0, rate: 92 };
+let fxAll = { at: 0, rates: {} };
+/** Все курсы ЦБ: рублей за 1 единицу валюты (KZT, VND, CNY, AED и т. д.). */
+export async function fxRates() {
+  if (Date.now() - fxAll.at < 6 * 3600_000) return fxAll.rates;
+  try {
+    const res = await fetch('https://www.cbr-xml-daily.ru/daily_json.js', { signal: AbortSignal.timeout(5000) });
+    const r = ratesFromCbr(await res.json());
+    if (Object.keys(r).length) fxAll = { at: Date.now(), rates: r }; else fxAll.at = Date.now();
+  } catch { fxAll.at = Date.now(); }
+  return fxAll.rates;
+}
+
+/** Яндекс Метрика: визиты и достигнутые цели по utm_source за 30 дней. */
+export function metrikaService(getChannelConfig) {
+  return async (ctx) => {
+    const c = await getChannelConfig(ctx, 'metrika');
+    if (!c?.enabled || !c.counterId || !c.token) return null;
+    const q = new URLSearchParams({ ids: String(c.counterId), metrics: 'ym:s:visits,ym:s:sumGoalReachesAny', dimensions: 'ym:s:UTMSource', date1: '30daysAgo', date2: 'today', limit: '50' });
+    const res = await fetch('https://api-metrika.yandex.net/stat/v1/data?' + q, { headers: { Authorization: 'OAuth ' + c.token }, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error('Метрика: HTTP ' + res.status);
+    const j = await res.json();
+    return { counter: c.counterId, days: 30, rows: (j.data || []).map(d => ({ source: d.dimensions?.[0]?.name || '(нет utm)', visits: d.metrics?.[0] || 0, goals: d.metrics?.[1] || 0 })) };
+  };
+}
+
 export async function usdRate() {
   if (Date.now() - fxCache.at < 6 * 3600_000) return fxCache.rate;
   try {

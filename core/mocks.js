@@ -90,3 +90,19 @@ export const MOCK_TEAM = {
   'https://technoservice-pro.example': `<h2>Команда</h2><div>Орлов Дмитрий Сергеевич</div><div>Основатель и генеральный директор</div><div>Анна Белова</div><div>Руководитель сервисной службы</div>`,
   'https://codelab.example': `<h2>О нас</h2><p>Алексей Ким — CEO и основатель студии</p>`,
 };
+
+/** Демо-организации с карт (вымышленные): для режима «Харви: почта». */
+export const MOCK_ORGS = [
+  { id: 'org-1', name: 'Клиника «Белый клык»', city: 'Москва', address: 'Москва, ул. Примерная, 12', site: 'https://belyklyk.example', email: 'owner@belyklyk.example', phone: '+7 495 000-00-01', rating: 4.3, reviews: 214, branches: 3 },
+  { id: 'org-2', name: 'Агентство недвижимости «Квадрат»', city: 'Казань', address: 'Казань, пр. Демо, 5', site: 'https://kvadrat-realty.example', email: 'info@kvadrat-realty.example', phone: '+7 843 000-00-02', rating: 4.8, reviews: 96, branches: 2 },
+  { id: 'org-3', name: 'Школа английского «Спикап»', city: 'Москва', address: 'Москва, Тестовый пер., 3', site: 'https://speakup-school.example', email: 'hello@speakup-school.example', phone: '+7 495 000-00-03', rating: 4.9, reviews: 51, branches: 1 },
+  { id: 'org-4', name: 'Saigon Dental Care', city: 'Хошимин', address: 'Ho Chi Minh City, District 1, Demo st. 7', site: 'https://saigondental.example', email: 'contact@saigondental.example', phone: '+84 28 0000 0004', rating: 4.4, reviews: 330, branches: 4 },
+  { id: 'org-5', name: 'Desert Fitness Club', city: 'Дубай', address: 'Dubai, Demo Tower', site: 'https://desertfit.example', email: 'manager@desertfit.example', phone: '+971 4 000 0005', rating: 4.6, reviews: 120, branches: 2 },
+  { id: 'org-6', name: 'Ремонт «Без пыли»', city: 'Москва', address: 'Москва, ул. Демо, 1', site: '', email: 'zakaz@bezpyli.nomail.example', phone: '+7 495 000-00-06', rating: 4.1, reviews: 40, branches: 1 },
+];
+
+/** Демо-вакансии с других площадок (Работа России, hh.kz, SuperJob). */
+export const MOCK_SOURCE_VACANCIES = [
+  { id: 'tv-501', name: 'Руководитель отдела продаж', alternate_url: 'https://trudvsem.ru/vacancy/card/demo/501', published_at: new Date(Date.now() - 12 * 86400000).toISOString(), area: { name: 'Нижний Новгород' }, salary: { from: 150000, to: 220000, currency: 'RUR' }, employer: { name: 'Завод «Деталь-НН»' }, description: 'Производство металлоконструкций, 25 лет на рынке. Построить отдел продаж с нуля, подчинение генеральному директору (собственнику).' },
+  { id: 'kz-502', name: 'Коммерческий директор', alternate_url: 'https://hh.kz/vacancy/demo502', published_at: new Date(Date.now() - 20 * 86400000).toISOString(), area: { name: 'Алматы' }, salary: { from: 1500000, to: 2500000, currency: 'KZT' }, employer: { name: 'Asia Logistic Group' }, description: 'Логистическая компания, 3 филиала. Нужен коммерческий директор — правая рука собственника, выстроить продажи.' },
+];

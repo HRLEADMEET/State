@@ -12,10 +12,12 @@ import { webService } from './services/web.js';
 import { llmService } from './services/llm.js';
 import { dadataService } from './services/dadata.js';
 import { sendMail } from './services/smtp.js';
-import { telegramSend, transcribe, usdRate, OAUTH, oauthEnabled, mymeetService } from './services/misc.js';
-import { handle, inboundLead, getSettings, sendQuota, pipeline } from '../core/router.js';
+import { telegramSend, transcribe, usdRate, fxRates, OAUTH, oauthEnabled, mymeetService, metrikaService } from './services/misc.js';
+import { sourcesService } from './services/sources.js';
+import { recipientMx, domainHealth } from './services/dnscheck.js';
+import { handle, inboundLead, getSettings, sendQuota, pipeline, growth } from '../core/router.js';
 import { seedDemo, mockServices } from '../core/seed.js';
-import { HttpError, nowIso, uid } from '../core/util.js';
+import { HttpError, nowIso, uid, clip } from '../core/util.js';
 import { PLANS } from '../core/catalog.js';
 
 const db = openDb();
@@ -40,6 +42,8 @@ const hh = hhService(channelConfig);
 const llm = llmService(channelConfig);
 const dadata = dadataService(channelConfig);
 const mymeet = mymeetService(channelConfig);
+const sources = sourcesService(channelConfig, hh);
+const metrika = metrikaService(channelConfig);
 
 function unsubscribeToken(ws, leadId) {
   const payload = Buffer.from(`${ws}.${leadId}`).toString('base64url');
@@ -57,7 +61,8 @@ function services(ctx) {
 
 function realServices(ctx) {
   return {
-    hh, web: webService, llm, dadata, mymeet,
+    hh, web: webService, llm, dadata, mymeet, sources, metrika, fx: fxRates,
+    dns: { recipientMx, domainHealth },
     secrets: { seal: async (v) => seal(v) },
     mail: {
       async send(ctx, m) {
@@ -195,6 +200,12 @@ async function authRoute(req, res, sub) {
       return send(res, 200, { ok: true, csrf });
     }
     const { user, ws } = createAccount({ email, password: body.password, name: body.name, wsName: body.company });
+    // Реферальная ссылка ?ref=КОД: новый кабинет записывается агенту, % считается с оплат.
+    const refWs = /^[A-Z0-9]{4,12}$/.test(String(body.ref || '')) ? store.kvGet('ref:' + body.ref) : null;
+    if (refWs && refWs !== ws.id && store.getWorkspace(refWs)) {
+      store.put(refWs, 'referrals', { id: 'r_' + ws.id, wsId: ws.id, name: clip(String(body.company || ''), 120), paidRub: 0, createdAt: nowIso(), updatedAt: nowIso() });
+      store.audit({ ws: refWs, user: null, action: 'referral.signup', data: { ws: ws.id } });
+    }
     const csrf = startSession(res, req, user, ws.id);
     return send(res, 200, { ok: true, csrf });
   }
@@ -394,7 +405,7 @@ async function route(req, res) {
   }
   if (sub === '/backups' && req.method === 'GET') { if (cur.role !== 'owner') throw new HttpError(403, 'Только владелец.'); return send(res, 200, { backups: listBackups(), everyHours: config.backupEveryHours, keep: config.backupKeep }); }
   if (sub === '/backups' && req.method === 'POST') { if (cur.role !== 'owner') throw new HttpError(403, 'Только владелец.'); const b = backupNow(db); store.audit({ ws: ctx.ws.id, user: cur.user.id, action: 'backup.manual', data: { sha256: b.sha256 } }); return send(res, 200, { ...b, file: path.basename(b.file) }); }
-  if (sub === '/fx' && req.method === 'GET') return send(res, 200, { usdRate: await usdRate() });
+  if (sub === '/fx' && req.method === 'GET') return send(res, 200, { usdRate: await usdRate(), rates: await fxRates() });
   if (sub === '/bootstrap') {
     const data = await handle(ctx, 'GET', '/bootstrap');
     data.csrf = cur.sess.csrf; data.oauth = oauthEnabled(); data.baseUrl = config.baseUrl;
@@ -425,12 +436,16 @@ server.headersTimeout = 30_000;
 async function emailTick() {
   const now = new Date();
   for (const ws of store.listWorkspaces()) {
-    const queued = store.list(ws.id, 'messages').filter(m => m.status === 'queued' && m.channel === 'email');
-    if (!queued.length) continue;
+    const all = store.list(ws.id, 'messages');
+    if (!all.some(m => (m.status === 'queued' || m.status === 'scheduled') && m.channel === 'email')) continue;
     const owner = store.membersOf(ws.id).find(m => m.role === 'owner');
     const user = owner && store.userById(owner.id);
     if (!user) continue;
     const ctx = { store, ws, user, role: 'owner' }; ctx.services = services(ctx); ctx.audit = async (e) => store.audit(e);
+    await growth.harveyTick(ctx).catch(e => console.warn('[harvey]', e.message));
+    // Письмо уходит не раньше sendAfter (рабочее время получателя по его поясу).
+    const queued = store.list(ws.id, 'messages').filter(m => m.status === 'queued' && m.channel === 'email' && (!m.sendAfter || Date.parse(m.sendAfter) <= now.getTime()));
+    if (!queued.length) continue;
     const settings = await getSettings(ctx);
     const s = settings.sending;
     const h = now.getHours();

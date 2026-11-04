@@ -2,6 +2,7 @@
 // сам проводит отбор → есть повод для разговора и понятная боль. Здесь — нормализация,
 // скоринг «нанимает ли собственник лично» и гипотезы боли для письма и встречи.
 import { OWNER_HIRED_ROLES } from './catalog.js';
+import { CURRENCIES, rateOf } from './currency.js';
 import { stripHtml, daysBetween } from './util.js';
 import { vacancyCost } from './economics.js';
 import { roleAcc, plural } from './ru.js';
@@ -12,7 +13,9 @@ export function normalizeVacancy(v = {}) {
   const salary = v.salary || v.salary_range || null;
   const from = salary?.from || null, to = salary?.to || null;
   const gross = salary?.gross;
-  const salaryRub = salary && (salary.currency === 'RUR' || salary.currency === 'RUB' || !salary.currency) ? (to || from) : null;
+  const cur = salary?.currency === 'BYR' ? 'BYN' : salary?.currency;
+  // Зарплата в тенге, сумах, долларах и т. д. — переводим в рубли по курсу (иначе скоринг hh.kz ломается).
+  const salaryRub = !salary || !(to || from) ? null : (cur === 'RUR' || cur === 'RUB' || !cur) ? (to || from) : CURRENCIES.some(c => c.code === cur) ? Math.round((to || from) * rateOf(cur)) : null;
   return {
     id: String(v.id || ''),
     title: v.name || v.title || '',

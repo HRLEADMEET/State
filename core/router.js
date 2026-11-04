@@ -14,6 +14,8 @@ import { funnelModel, payback, saasModel, channelRoi, PAYMENT_TERMS, paymentPlan
 import { parsePeople } from './research.js';
 import { DEFAULT_FILTERS } from './hhSignals.js';
 import { registerPipeline } from './pipeline.js';
+import { registerGrowth } from './growth.js';
+import { preSendGate } from './harvey.js';
 import { leadSummary } from './summary.js';
 
 const routes = [];
@@ -62,6 +64,11 @@ export function defaultSettings(ws = {}) {
     autopilot: { enabled: false, morningHour: 8, eveningHour: 20, dailyNew: 20, prepare: 20, minScore: 45, autoResearch: true, noReplyDays: 3 },
     proofs: null,
     playbook: { hhLetter: '', notes: '' },
+    currency: { second: 'USD', markets: ['RUB', 'USD', 'KZT', 'VND', 'CNY', 'AED', 'EUR', 'TRY'] },
+    fx: { rates: {} },
+    harvey: { signals: ['HIRING_SALES', 'NO_TEAM_PAGE_OWNER', 'CHAT_NO_CRM', 'MULTI_BRANCH'], autopilot: false },
+    referral: { percent: 10 },
+    dismissed: [],
     onboardingDone: false, launchDone: false,
   };
 }
@@ -107,7 +114,7 @@ export function publicSettings(s) {
   return {
     id: 'main', me: { name: s.me?.name, title: s.me?.title, telegram: s.me?.telegram }, brand: { name: s.brand?.name }, usdRate: s.usdRate,
     offers: s.offers, hh: { roles: s.hh?.roles, area: s.hh?.area, salaryFrom: s.hh?.salaryFrom, period: s.hh?.period, minScore: s.hh?.minScore },
-    tz: s.tz, autopilot: { enabled: !!s.autopilot?.enabled, morningHour: s.autopilot?.morningHour, eveningHour: s.autopilot?.eveningHour },
+    currency: s.currency, fx: s.fx, tz: s.tz, autopilot: { enabled: !!s.autopilot?.enabled, morningHour: s.autopilot?.morningHour, eveningHour: s.autopilot?.eveningHour },
     onboardingDone: s.onboardingDone, launchDone: s.launchDone,
   };
 }
@@ -369,6 +376,7 @@ R('POST', '/messages/:id/send', 'messages', async (ctx, { params, body }) => {
   if (msg.channel === 'email' && !body.manual) {
     need(msg.to, 400, 'Нет email получателя. Добавьте его в карточку лида.');
     need(isEmail(msg.to), 400, 'Некорректный email получателя.');
+    if (msg.approach === 'harvey') { const g = preSendGate({ to: msg.to, subject: msg.subject, body: msg.body, lead }); if (!g.ok) { msg.status = 'blocked'; msg.gate = g.reasons; await put(ctx, 'messages', msg); throw new HttpError(422, 'Письмо не прошло фильтр: ' + g.reasons.join('; ')); } }
     if (!ctx.services?.mail) throw new HttpError(400, 'Почта не подключена. Раздел «Каналы» → Почта (SMTP).');
     const quota = await sendQuota(ctx, settings);
     if (!body.now || quota.left <= 0) {
@@ -740,7 +748,10 @@ R('POST', '/workspaces', 'settings', async (ctx, { body }) => {
   await S(ctx).saveWorkspace(parent);
   const childPlan = PLANS.some(p => p.id === body.plan) ? body.plan : 'start';
   const ws = await S(ctx).createWorkspace({ name: clip(String(body.name).trim(), 120), kind: 'client', plan: childPlan, parentId: parent.id, credits: transfer, ownerUserId: ctx.user?.id });
-  if (body.cloneFrom !== false) {
+  if (body.template === 'blank') {
+    // Чистый тестовый кабинет под другую гипотезу (например, второй продукт): без офферов, кейсов и HH-ролей.
+    await S(ctx).put(ws.id, 'settings', { ...defaultSettings(ws), offers: [{ id: 'test', name: 'Тестовый оффер', priceRub: 100000, kind: 'service', desc: 'Опишите продукт и цену' }], proofs: [], hh: { ...defaultSettings(ws).hh, roles: [] }, id: 'main', createdAt: nowIso(), updatedAt: nowIso() });
+  } else if (body.cloneFrom !== false) {
     // «Отгрузить идеальную модель»: настройки, офферы, правила и эксперименты. Кейсы клиент вносит свои.
     const settings = await getSettings(ctx);
     const clone = { ...settings, brand: { ...settings.brand, name: ws.name }, proofs: [], onboardingDone: false, autopilot: { ...settings.autopilot, enabled: false } };
@@ -779,5 +790,6 @@ R('GET', '/audit', 'settings', async (ctx, { query }) => ctx.services?.auditList
 
 // Конвейер, автопилот, hh-отклики, CRM-файл, прогноз — отдельный модуль, без циклических импортов.
 export const pipeline = registerPipeline(R, { list, get, put, spend, audit, advance, getSettings, handle, deepLink, sendQuota });
+export const growth = registerGrowth(R, { list, get, put, spend, audit, getSettings });
 
 export { routes };

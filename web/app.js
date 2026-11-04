@@ -6,6 +6,38 @@ import { viewMeetings, viewScript, viewCalls, viewExperiments, viewAnalytics } f
 import { viewChannels, viewCabinets, viewInvestors, viewSecurity, viewPrefs, viewMemo, catSvg, fraudMemoHtml } from './views-admin.js';
 import { startTour } from './tour.js';
 import { viewQueue, viewForecast, viewLaunch, viewPack } from './views-flow.js';
+import { startGalaxy, startTips } from './galaxy.js';
+import { openFaq } from './faq.js';
+
+// Реферальный код из ссылки агента (?ref=КОД) — запоминаем до регистрации.
+function refCode() {
+  const r = new URLSearchParams(location.search).get('ref');
+  try { if (r && /^[A-Z0-9]{4,12}$/.test(r)) localStorage.setItem('lm-ref', r); return r || localStorage.getItem('lm-ref') || ''; } catch { return r || ''; }
+}
+
+/** Логотип: созвездие — сигнал (голубой) связан с собственником (золотой). */
+export function logoSvg(size = 30) {
+  return `<svg class="logo" width="${size}" height="${size}" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#0b1f3a"/><path d="M7 22 L13 11 L20 17 L25 8" stroke="#5aa9ff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/><path d="M13 11 L25 8" stroke="#5aa9ff" stroke-width="1" opacity=".45"/><circle cx="7" cy="22" r="2.6" fill="#5adcff"/><circle cx="13" cy="11" r="1.7" fill="#d2e1ff"/><circle cx="20" cy="17" r="1.7" fill="#d2e1ff"/><circle cx="25" cy="8" r="3.2" fill="#ffcd6e"/></svg>`;
+}
+
+const AUTH_TIPS = [
+  'Пока вакансия РОПа открыта, продажи болят у собственника каждый день — это ваше окно для разговора.',
+  'Пишите собственнику его словами: система разбирает стиль его постов — длину фраз, эмодзи, обращение.',
+  'Капчу hh.ru вводит человек: приложение пришлёт ссылку на телефон, обходить защиту не нужно.',
+  'Утро — 15 минут в «Конвейере»: скопировать → открыть чат → «Отправлено». Остальное делает автопилот.',
+  'Цифры в письме — только из карточки лида и ваших кейсов. Оценщик подсветит всё, что не подтверждено.',
+  'Голубые точки вокруг — сигналы. Золотые — собственники. Коснитесь экрана, чтобы запустить импульс.',
+  '«Харви: почта» ищет компании на картах и пишет 2 коротких письма: второе — только если нет ответа.',
+  'Сравнивайте заходы: A/B покажет, какой первый абзац приводит на встречу, а не просто к ответу.',
+  'Перед встречей откройте скрипт: вопросы о цифрах, цене бездействия и следующем шаге уже собраны.',
+  'Загрузите запись звонка — разбор покажет, где вы говорили больше клиента и какой вопрос пропустили.',
+  'Кредиты тратятся только на работу: исследование — 1, письмо от Claude — 2, разбор звонка — 5.',
+  'Цены можно показать клиенту в тенге, донгах, юанях или дирхамах — по курсу ЦБ.',
+  'Кнопка «Стать агентом» даёт личную ссылку: процент с оплат приведённых кабинетов.',
+  'Наклоните телефон — галактика повернётся следом.',
+  'Где-то в углу мерцает звезда. За ней — тайная библиотека ответов на пяти языках.',
+  'Госуслуги живут только на gosuslugi.ru. Кот на соседней кнопке это подтвердит.',
+];
 
 const NAV = [
   { id: 'dashboard', name: 'Пульт', icon: 'home' },
@@ -59,18 +91,24 @@ async function renderAuth(mode = 'login') {
   if (inviteToken) mode = 'register';
   const sso = (id, label, color, letter) => `<button class="btn" type="button" data-sso="${id}" data-tour="sso-${id}"><i style="background:${color}">${letter}</i>${label}</button>`;
   app.innerHTML = `
-  <div class="auth">
+  <div class="auth galaxy-page">
+    <canvas class="galaxy" aria-hidden="true"></canvas>
+    <button class="secret-star" type="button" id="secret-star" aria-label="Тайная библиотека: ответы на вопросы на пяти языках" title="✦">✦</button>
     <section class="auth-side">
-      <div class="brand"><span class="brand-mark">LM</span><span>LEADMEET OS<small style="color:inherit;opacity:.7">система привлечения собственников</small></span></div>
-      <h1>Находит собственника, пишет ему его же языком и готовит вас к встрече</h1>
-      <div class="flow">
-        <div><b>01</b><span>Сигнал: компания ищет РОПа или коммерческого директора на hh.ru</span></div>
-        <div><b>02</b><span>Исследование: сайт, канал собственника, стиль его постов</span></div>
-        <div><b>03</b><span>Личное письмо в его стиле с фактами о компании</span></div>
-        <div><b>04</b><span>Ответ → встреча → скрипт продающего интервью</span></div>
-        <div><b>05</b><span>Разбор записи звонка → сделка от 200 000 ₽</span></div>
+      <div class="float-layer">
+        <div class="brand" id="auth-brand">${logoSvg()}<span>LEADMEET OS<small style="color:inherit;opacity:.7">встречи с собственниками бизнеса</small></span></div>
+        <h1 class="h4u">Встречи с собственниками на чек от <span class="glow">200&nbsp;000&nbsp;₽</span> — пока их вакансия РОПа ещё открыта</h1>
+        <p class="lead-in">Собственник ищет руководителя продаж на hh.ru — значит, продажи болят у него <b>сегодня</b>. LEADMEET находит этот момент, изучает компанию и пишет ему так, как пишет он сам.</p>
+        <ol class="orbit">
+          <li><b>Ловим момент</b><span>вакансия РОПа или коммерческого директора = открытая боль</span></li>
+          <li><b>Знаем всё до письма</b><span>сайт, ЕГРЮЛ, Telegram-канал и манера собственника</span></li>
+          <li><b>Пишем его словами</b><span>коротко, с фактами о его компании, без шаблонов</span></li>
+          <li><b>Ведём к встрече</b><span>ответ → слот в календаре → скрипт продающего интервью</span></li>
+          <li><b>Доводим до сделки</b><span>разбор записи звонка и следующий шаг</span></li>
+        </ol>
+        <p class="proof small">Из практики: 29&nbsp;360 откликов → 11 менеджеров на плане, 13&nbsp;928&nbsp;₽ за менеджера.</p>
+        <div class="tips" id="auth-tips" tabindex="0" role="button" aria-label="Совет. Нажмите, чтобы показать следующий"></div>
       </div>
-      <p style="opacity:.75" class="small">Цифры из практики: 29 360 откликов → 11 менеджеров на плане, 13 928 ₽ за менеджера.</p>
     </section>
     <section class="auth-main">
       <form class="auth-box" id="auth-form" autocomplete="on">
@@ -92,10 +130,18 @@ async function renderAuth(mode = 'login') {
       </form>
     </section>
   </div>`;
+  const gal = startGalaxy(app.querySelector('.galaxy'), { onParallax: (x, y) => { const f = app.querySelector('.float-layer'); if (f) f.style.transform = `translate3d(${(x * -12).toFixed(1)}px, ${(y * -9).toFixed(1)}px, 0)`; } });
+  startTips($('#auth-tips'), AUTH_TIPS);
+  $('#secret-star').addEventListener('click', openFaq);
+  let taps = 0, tapT = 0;
+  $('#auth-brand').addEventListener('click', () => { clearTimeout(tapT); if (++taps >= 3) { taps = 0; openFaq(); } tapT = setTimeout(() => { taps = 0; }, 600); });
+  const onQ = (e) => { if (!document.querySelector('.galaxy')) return document.removeEventListener('keydown', onQ); if (e.key === '?' && !/INPUT|TEXTAREA/.test(document.activeElement?.tagName)) openFaq(); };
+  document.addEventListener('keydown', onQ);
+  void gal;
   const form = $('#auth-form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = { email: $('#a-email').value, password: $('#a-pass').value, name: $('#a-name')?.value, totp: $('#a-totp').value, invite: inviteToken };
+    const body = { email: $('#a-email').value, password: $('#a-pass').value, name: $('#a-name')?.value, totp: $('#a-totp').value, invite: inviteToken, ref: refCode() };
     try {
       const r = mode === 'register' ? await S.api.auth.register(body) : await S.api.auth.login(body);
       if (r.needTotp) { $('#totp-field').hidden = false; $('#a-totp').focus(); return; }
@@ -131,7 +177,7 @@ function renderShell() {
   app.innerHTML = `
   <div class="shell">
     <aside class="rail" id="rail" data-tour="rail">
-      <div class="brand"><span class="brand-mark">LM</span><span>LEADMEET OS<small>${esc(b.ws.name)}</small></span></div>
+      <div class="brand">${logoSvg()}<span>LEADMEET OS<small>${esc(b.ws.name)}</small></span></div>
       <nav class="nav" aria-label="Разделы">
         ${nav.map(n => n.sep ? `<div class="label nav-sep">${n.sep}</div>` : `<a href="#${n.id}" data-nav="${n.id}" data-tour="nav-${n.id}">${icon(n.icon)}<span>${n.name}</span>${n.count ? `<span class="cnt" data-count="${n.count}"></span>` : ''}</a>`).join('')}
       </nav>

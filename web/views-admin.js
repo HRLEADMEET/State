@@ -1,6 +1,7 @@
 // Каналы, Кабинеты и тарифы, Инвесторам, Безопасность, Настройки, Памятка с котиком.
 import { S, call, act, refreshBoot } from './state.js';
 import { esc, icon, money, usd, toast, modal, hint, copy, fmtDate, formData, pct, $, $$ } from './ui.js';
+import { ordersCard, bindOrders } from './views-growth.js';
 
 const MODE = { api: ['API', 'ok'], webhook: ['вебхук', 'brand'], manual: ['живое касание', 'warn'] };
 
@@ -54,6 +55,7 @@ export async function viewCabinets(el) {
         <label class="field"><span>Название</span><input id="ws-name" name="name" required placeholder="ТехноСервис Про — отдел продаж"></label>
         <label class="field"><span>Тариф</span><select id="ws-plan" name="plan">${b.catalog.plans.map(p => `<option value="${p.id}">${esc(p.name)} — ${money(p.priceRub, { usd: false })}/мес, ${p.credits} кредитов</option>`).join('')}</select></label>
         <label class="switch"><input type="checkbox" id="ws-clone" name="cloneFrom" checked> Скопировать мою модель (офферы, заходы, эксперименты)</label>
+        <label class="field"><span>Шаблон ${hint('«Чистый тест» — пустой кабинет под другую гипотезу или второй продукт (например, роботы): тестовый оффер, без ваших кейсов и HH-ролей.')}</span><select name="template"><option value="">Моя модель / клиент</option><option value="blank">Чистый тест: второй продукт</option></select></label>
         <div><button class="btn primary" type="submit">${icon('plus')}Создать кабинет</button></div></form>
     </div>
     <h2>Тарифы платформы</h2>
@@ -69,6 +71,7 @@ export async function viewCabinets(el) {
     const s = e.target.closest('[data-switch]'); if (s) { await act(() => S.api.auth.switch(s.dataset.switch)); location.hash = '#dashboard'; location.reload(); }
     const bu = e.target.closest('[data-buy]'); if (bu) { const r = await act(() => call('POST', '/billing/credits', { packId: bu.dataset.buy })); if (r) { toast(`Баланс: ${r.credits} кредитов`); const c = $('#credit-count'); if (c) c.textContent = r.credits; } }
   });
+  if (S.boot.role === 'owner') { const ob = document.createElement('div'); ob.innerHTML = await ordersCard(); el.append(ob); bindOrders(ob); }
   $('#invite')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = formData(e.target); const r = await act(() => S.api.auth.invite(f)); if (r) $('#inv-out').innerHTML = `<p class="small">Ссылка на 7 дней (роль: ${esc(r.role)}):</p><div class="row" style="flex-wrap:nowrap"><input readonly value="${esc(r.link)}"><button class="btn sm" data-copy-inv>${icon('copy')}</button></div>`; $('[data-copy-inv]')?.addEventListener('click', () => copy(r.link)); });
 }
 

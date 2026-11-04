@@ -134,7 +134,7 @@ export async function viewAnalytics(el) {
     <div class="grid g2">
       <form class="card" id="fm" data-tour="model"><div class="card-head"><h3>Модель месяца</h3>${canEdit ? '<button class="btn sm" type="button" id="fm-actual">Подставить мои фактические конверсии</button>' : ''}</div>
         <div class="form-grid">
-          ${numField('signalsPerMonth', 'Сигналов в месяц', 600)}${numField('researchRate', 'Доля исследуем и пишем', 0.5, 0.05)}${numField('replyRate', 'Доля ответов', 0.12, 0.01)}${numField('meetingRate', 'Доля ответ → встреча', 0.4, 0.05)}
+          ${numField('signalsPerMonth', 'Новых лидов в месяц', 600)}${numField('researchRate', 'Доля исследуем и пишем', 0.5, 0.05)}${numField('replyRate', 'Доля ответов', 0.12, 0.01)}${numField('meetingRate', 'Доля ответ → встреча', 0.4, 0.05)}
           ${numField('showRate', 'Доходимость', 0.8, 0.05)}${numField('closeRate', 'Встреча → сделка', 0.25, 0.05)}${numField('avgCheckRub', 'Средний чек, ₽', 250000, 10000)}${numField('upsellRub', 'Допродажа, ₽', 50000, 5000)}
           ${numField('costPerSignalRub', 'Себестоимость касания, ₽', 15)}${numField('fixedMonthlyRub', 'Постоянные расходы, ₽', 30000, 1000)}${numField('trafficSpendRub', 'Реклама, ₽', 0, 1000)}${numField('hoursPerMeeting', 'Часов на встречу', 1.5, 0.5)}
         </div><div id="fm-out"></div></form>
@@ -150,7 +150,7 @@ export async function viewAnalytics(el) {
     <div><span class="label">Касаний</span><br><b>${r.touched}</b></div><div><span class="label">Встреч</span><br><b>${r.meetingsHeld}</b></div><div><span class="label">Сделок</span><br><b>${r.deals}</b></div>
     <div><span class="label">Выручка</span><br><b>${money(r.revenueRub)}</b></div><div><span class="label">Расходы</span><br><b>${money(r.costRub)}</b></div><div><span class="label">Прибыль</span><br><b>${money(r.profitRub)}</b></div>
     <div><span class="label">CAC</span><br><b>${r.cacRub != null ? money(r.cacRub) : '—'}</b></div><div><span class="label">ROI</span><br><b>${r.roiPct != null ? pct(r.roiPct) : '—'}</b></div><div><span class="label">Выручка с часа встреч</span><br><b>${money(r.revenuePerHourRub)}</b></div></div>
-    <p class="small mute">Безубыточность: ${String(r.breakEvenDeals).replace('.', ',')} сделки в месяц. На одну сделку нужно ${r.signalsPerDeal ?? '—'} сигналов.</p>`);
+    <p class="small mute">Безубыточность: ${String(r.breakEvenDeals).replace('.', ',')} сделки в месяц. На одну сделку нужно ${r.signalsPerDeal ?? '—'} лидов.</p>`);
   const pb = () => run($('#pb'), '/economics/payback', '#pb-out', (r) => `<p><b>${r.paybackMonths != null ? 'Окупится за ' + String(r.paybackMonths).replace('.', ',') + ' мес.' : 'Не окупается при этих цифрах'}</b> · ROI за горизонт: ${r.roiPct != null ? pct(r.roiPct) : '—'} · чистыми: ${money(r.totalNetRub)}</p>${sparkline(r.curve.map(c => c.cumulativeRub))}`);
   const sa = () => run($('#saas'), '/economics/saas', '#saas-out', (r) => `<div class="grid g3 small"><div><span class="label">MRR</span><br><b>${money(r.mrrRub)}</b></div><div><span class="label">ARR</span><br><b>${money(r.arrRub)}</b></div><div><span class="label">LTV / CAC</span><br><b>${r.ltvToCac ?? '—'}</b></div><div><span class="label">ARPU</span><br><b>${money(r.arpuRub)}</b></div><div><span class="label">LTV</span><br><b>${r.ltvRub ? money(r.ltvRub) : '—'}</b></div><div><span class="label">Окупаемость CAC</span><br><b>${r.cacPaybackMonths ?? '—'} мес.</b></div></div>`);
   $('#fm').addEventListener('input', fm); $('#pb').addEventListener('input', pb); $('#saas').addEventListener('input', sa);

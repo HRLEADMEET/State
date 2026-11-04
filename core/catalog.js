@@ -45,7 +45,7 @@ export const DEFAULT_OFFERS = [
 
 /** Тарифы SaaS: абонентка + кредиты. 1 кредит = 1 исследование компании + персональное сообщение. */
 export const PLANS = [
-  { id: 'start', name: 'Старт', priceRub: 14900, credits: 300, seats: 1, workspaces: 1, features: ['HH-сигналы', 'Письма в стиле собственника', 'Скрипты встреч', 'Аналитика воронки'] },
+  { id: 'start', name: 'Старт', priceRub: 14900, credits: 300, seats: 1, workspaces: 1, features: ['Лиды с hh.ru', 'Письма в стиле собственника', 'Скрипты встреч', 'Аналитика воронки'] },
   { id: 'pro', name: 'Про', priceRub: 39900, credits: 1200, seats: 3, workspaces: 3, features: ['Всё из Старт', 'A/B офферов с автовыбором', 'Разбор звонков', 'Telegram/WhatsApp', 'Свои каналы трафика'] },
   { id: 'agency', name: 'Агентство', priceRub: 99000, credits: 4000, seats: 10, workspaces: 25, features: ['Всё из Про', 'Кабинеты клиентов', 'White-label', 'Роль наблюдателя для инвесторов', 'Приоритетная поддержка'] },
 ];
@@ -72,7 +72,7 @@ export const CHANNELS = [
   { type: 'google_ads', name: 'Google Ads', dir: 'in', mode: 'webhook', fields: [{ k: 'key', label: 'Webhook key лид-форм', secret: true }], doc: 'Lead Form Extensions → вебхук.' },
   { type: 'tiktok', name: 'TikTok Ads', dir: 'in', mode: 'webhook', fields: [{ k: 'token', label: 'Access token', secret: true }], doc: 'Instant Form → вебхук / Zapier.' },
   { type: 'instagram', name: 'Instagram / Facebook Lead Ads', dir: 'in', mode: 'webhook', fields: [{ k: 'verify', label: 'Verify token', secret: true }], doc: 'Meta Lead Ads → вебхук.' },
-  { type: 'tg_chats', name: 'Чаты руководителей (Telegram/VK)', dir: 'in', mode: 'manual', fields: [{ k: 'list', label: 'Список чатов (по строке)' }], doc: 'Источник: чаты собственников, коучей, психологов, стоматологов, IT. Ручная работа с сигналами.' },
+  { type: 'tg_chats', name: 'Чаты руководителей (Telegram/VK)', dir: 'in', mode: 'manual', fields: [{ k: 'list', label: 'Список чатов (по строке)' }], doc: 'Источник: чаты собственников, коучей, психологов, стоматологов, IT. Ручная работа с лидами.' },
   { type: 'site_form', name: 'Любой сайт (виджет-форма)', dir: 'in', mode: 'webhook', fields: [], doc: 'Вставьте сниппет — заявки с любого сайта падают в систему с utm.' },
   { type: 'recorder', name: 'Записи звонков (mymeet.ai, Zoom, Телемост, МТС Линк, диктофон)', dir: 'in', mode: 'webhook', fields: [{ k: 'provider', label: 'Сервис: mymeet / openai / deepgram' }, { k: 'key', label: 'API-ключ сервиса', secret: true }], doc: 'mymeet.ai: бот записывает встречу по ссылке, расшифровка уходит на разбор. Также — загрузка аудио или текста и вебхук готовой расшифровки.' },
   { type: 'superjob', name: 'SuperJob (вакансии)', dir: 'in', mode: 'api', fields: [{ k: 'apiKey', label: 'Secret key приложения api.superjob.ru', secret: true }], doc: 'Ещё одна площадка вакансий для HH-партизана. Ключ бесплатный: api.superjob.ru → «Зарегистрировать приложение».' },
@@ -106,7 +106,7 @@ export const NICHES = [
 ];
 
 export const STAGES = [
-  { id: 'new', name: 'Новый сигнал' },
+  { id: 'new', name: 'Новый лид' },
   { id: 'researched', name: 'Исследован' },
   { id: 'contacted', name: 'Написали' },
   { id: 'replied', name: 'Ответил' },

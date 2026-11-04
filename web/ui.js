@@ -1,19 +1,23 @@
 // UI-примитивы: экранирование, иконки, тосты, модалки, подсказки, форматирование денег.
 import { escapeHtml, fmtRub, fmtUsd } from '../core/util.js';
+import { rateOf, fmtCur } from '../core/currency.js';
 
 export const esc = escapeHtml;
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 let USD = 92;
-export function setUsd(r) { USD = Number(r) || 92; }
-/** Деньги всегда парой: «250 000 ₽ ($2 717)». */
+let SEC = { code: 'USD', rate: 92 }; // вторая валюта в скобках: по умолчанию доллар, можно тенге, донг, юань…
+export function setUsd(r) { USD = Number(r) || 92; if (SEC.code === 'USD') SEC.rate = USD; }
+export function setSecond(code = 'USD', rates = {}) { SEC = { code: code || 'USD', rate: code === 'USD' ? (Number(rates.USD) || USD) : rateOf(code, rates) }; }
+const second = (rub) => SEC.code === 'USD' ? fmtUsd((Number(rub) || 0) / SEC.rate) : fmtCur((Number(rub) || 0) / SEC.rate, SEC.code);
+/** Деньги всегда парой: «250 000 ₽ ($2 717)» или во второй валюте рынка. */
 export function money(rub, { usd = true } = {}) {
   if (rub === null || rub === undefined || Number.isNaN(Number(rub))) return '—';
-  return `<span class="money">${fmtRub(rub)}${usd ? ` <span class="mute">(${fmtUsd(rub / USD)})</span>` : ''}</span>`;
+  return `<span class="money">${fmtRub(rub)}${usd ? ` <span class="mute">(${second(rub)})</span>` : ''}</span>`;
 }
-export const moneyText = (rub) => `${fmtRub(rub)} (${fmtUsd(rub / USD)})`;
-export const usd = (rub) => fmtUsd((Number(rub) || 0) / USD);
+export const moneyText = (rub) => `${fmtRub(rub)} (${second(rub)})`;
+export const usd = (rub) => second(rub);
 
 const P = {
   home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',

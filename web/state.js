@@ -1,5 +1,5 @@
 // Общее состояние клиента и навигация.
-import { toast, setUsd } from './ui.js';
+import { toast, setUsd, setSecond } from './ui.js';
 
 export const S = {
   api: null,          // { mode, call(method, path, body), auth, uploadAudio }
@@ -27,6 +27,7 @@ export async function act(fn, okText) {
 export async function refreshBoot() {
   S.boot = await call('GET', '/bootstrap');
   setUsd(S.boot.settings?.usdRate);
+  setSecond(S.boot.settings?.currency?.second || 'USD', { USD: S.boot.settings?.usdRate, ...(S.boot.settings?.fx?.rates || {}) });
   return S.boot;
 }
 

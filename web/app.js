@@ -7,6 +7,7 @@ import { viewChannels, viewCabinets, viewInvestors, viewSecurity, viewPrefs, vie
 import { startTour } from './tour.js';
 import { viewQueue, viewForecast, viewLaunch, viewPack } from './views-flow.js';
 import { startGalaxy, startTips } from './galaxy.js';
+import { viewSources, viewHarvey, viewHypotheses } from './views-growth.js';
 import { openFaq } from './faq.js';
 
 // Реферальный код из ссылки агента (?ref=КОД) — запоминаем до регистрации.
@@ -42,13 +43,16 @@ const AUTH_TIPS = [
 const NAV = [
   { id: 'dashboard', name: 'Пульт', icon: 'home' },
   { id: 'queue', name: 'Конвейер', icon: 'send', count: 'queue' },
-  { id: 'signals', name: 'Сигналы HH', icon: 'radar' },
+  { id: 'signals', name: 'Поиск лидов', icon: 'radar' },
+  { id: 'sources', name: 'Где искать клиентов', icon: 'search' },
+  { id: 'harvey', name: 'Харви: почта', icon: 'mail' },
   { id: 'leads', name: 'Лиды', icon: 'users', count: 'leads' },
   { id: 'meetings', name: 'Встречи', icon: 'calendar', count: 'meetings' },
   { id: 'calls', name: 'Разбор звонков', icon: 'mic' },
   { id: 'experiments', name: 'A/B заходов', icon: 'flask' },
   { id: 'analytics', name: 'Аналитика и деньги', icon: 'chart' },
   { id: 'forecast', name: 'Что даст 100', icon: 'spark' },
+  { id: 'hypotheses', name: 'Гипотезы и рынки', icon: 'flask' },
   { sep: 'Система' },
   { id: 'launch', name: 'Мастер запуска', icon: 'check' },
   { id: 'pack', name: 'Упаковка профиля', icon: 'file' },
@@ -59,8 +63,8 @@ const NAV = [
   { id: 'prefs', name: 'Настройки', icon: 'sliders' },
   { id: 'memo', name: 'Памятка с котиком', icon: 'cat' },
 ];
-const VIEWS = { queue: viewQueue, forecast: viewForecast, launch: viewLaunch, pack: viewPack, dashboard: viewDashboard, signals: viewSignals, leads: viewLeads, lead: viewLead, meetings: viewMeetings, script: viewScript, calls: viewCalls, experiments: viewExperiments, analytics: viewAnalytics, channels: viewChannels, cabinets: viewCabinets, investors: viewInvestors, security: viewSecurity, prefs: viewPrefs, memo: viewMemo };
-const OBSERVER_VIEWS = ['investors', 'analytics', 'memo', 'forecast'];
+const VIEWS = { sources: viewSources, harvey: viewHarvey, hypotheses: viewHypotheses, queue: viewQueue, forecast: viewForecast, launch: viewLaunch, pack: viewPack, dashboard: viewDashboard, signals: viewSignals, leads: viewLeads, lead: viewLead, meetings: viewMeetings, script: viewScript, calls: viewCalls, experiments: viewExperiments, analytics: viewAnalytics, channels: viewChannels, cabinets: viewCabinets, investors: viewInvestors, security: viewSecurity, prefs: viewPrefs, memo: viewMemo };
+const OBSERVER_VIEWS = ['investors', 'analytics', 'memo', 'forecast', 'hypotheses'];
 
 export async function boot(api) {
   S.api = api;
@@ -98,7 +102,7 @@ async function renderAuth(mode = 'login') {
       <div class="float-layer">
         <div class="brand" id="auth-brand">${logoSvg()}<span>LEADMEET OS<small style="color:inherit;opacity:.7">встречи с собственниками бизнеса</small></span></div>
         <h1 class="h4u">Встречи с собственниками на чек от <span class="glow">200&nbsp;000&nbsp;₽</span> — пока их вакансия РОПа ещё открыта</h1>
-        <p class="lead-in">Собственник ищет руководителя продаж на hh.ru — значит, продажи болят у него <b>сегодня</b>. LEADMEET находит этот момент, изучает компанию и пишет ему так, как пишет он сам.</p>
+        <p class="lead-in">Собственник ищет руководителя продаж — значит, продажи болят у него <b>сегодня</b>. LEADMEET ловит этот момент на площадках вакансий, картах и в открытых данных, изучает компанию и пишет собственнику так, как пишет он сам.</p>
         <ol class="orbit">
           <li><b>Ловим момент</b><span>вакансия РОПа или коммерческого директора = открытая боль</span></li>
           <li><b>Знаем всё до письма</b><span>сайт, ЕГРЮЛ, Telegram-канал и манера собственника</span></li>
@@ -106,6 +110,8 @@ async function renderAuth(mode = 'login') {
           <li><b>Ведём к встрече</b><span>ответ → слот в календаре → скрипт продающего интервью</span></li>
           <li><b>Доводим до сделки</b><span>разбор записи звонка и следующий шаг</span></li>
         </ol>
+        <div class="platforms" aria-label="Где ищем клиентов">${['hh.ru', 'hh.kz', 'Работа России', 'SuperJob', 'Авито Работа', '2ГИС', 'Яндекс Карты', 'Google Maps', 'ЕГРЮЛ', 'сайты компаний', 'Telegram-чаты', 'реклама'].map(x => `<span>${x}</span>`).join('')}</div>
+        <div class="guarantee"><b>Гарантия: нет встреч с собственниками за 30 дней — вернём оплату</b><span class="small">Старт без оплаты: демо-кабинет с тестовой воронкой за 2 минуты, без карты.</span></div>
         <p class="proof small">Из практики: 29&nbsp;360 откликов → 11 менеджеров на плане, 13&nbsp;928&nbsp;₽ за менеджера.</p>
         <div class="tips" id="auth-tips" tabindex="0" role="button" aria-label="Совет. Нажмите, чтобы показать следующий"></div>
       </div>

@@ -1,4 +1,4 @@
-// Пульт, Сигналы HH, Лиды, Карточка лида (исследование, стиль, письмо, ответы, встреча, сделка).
+// Пульт, Поиск лидов, Лиды, Карточка лида (исследование, стиль, письмо, ответы, встреча, сделка).
 import { S, call, act, go, leadHash, scriptHash, stageName, hookName, offers, refreshBoot } from './state.js';
 import { esc, icon, money, usd, toast, modal, hint, copy, fmtDate, ago, formData, scoreRing, pct, $, $$ } from './ui.js';
 import { checkMessage } from '../core/quality.js';
@@ -9,48 +9,113 @@ const stagePill = (st) => `<span class="pill st-${st}">${esc(stageName(st))}</sp
 const CHANNEL_NAMES = { email: 'Email', telegram: 'Telegram', whatsapp: 'WhatsApp', zalo: 'Zalo', hh_chat: 'Чат hh.ru' };
 
 // ====================== ПУЛЬТ ======================
+// Одно главное дело на сейчас и деньги на кону: по открытым сделкам — их сумма, по остальным — средний чек × вероятность этапа.
+const STAGE_WIN = { 1: 0.03, 2: 0.08, 3: 0.12, 4: 0.4, 5: 0.3 }; // исследовать, написать, дожать, скрипт, назначить встречу
+
 export async function viewDashboard(el) {
-  const [a, leads, meetings, exps] = await Promise.all([call('GET', '/analytics'), call('GET', '/leads'), call('GET', '/meetings'), call('GET', '/experiments')]);
+  const [a, leads, meetings, exps, deals] = await Promise.all([call('GET', '/analytics'), call('GET', '/leads'), call('GET', '/meetings'), call('GET', '/experiments'), call('GET', '/deals').catch(() => [])]);
   const now = Date.now();
   const todo = [];
-  const fresh = leads.filter(l => l.stage === 'new').slice(0, 3);
-  for (const l of fresh) todo.push({ ic: 'search', t: `Исследовать «${l.company}»`, d: `Сигнал: ${l.vacancy?.title || l.source}. Оценка ${l.score}.`, href: leadHash(l.id), btn: 'Исследовать' });
-  for (const l of leads.filter(l => l.stage === 'researched').slice(0, 3)) todo.push({ ic: 'mail', t: `Написать ${l.owner?.name || 'собственнику'} · ${l.company}`, d: `${l.factsCount ?? l.facts?.length ?? 0} фактов собрано${l.owner?.style?.ok ? ', стиль собственника известен' : ''}.`, href: leadHash(l.id), btn: 'Написать' });
-  for (const l of leads.filter(l => l.stage === 'replied' && !l.demo).slice(0, 3)) todo.push({ ic: 'calendar', t: `Назначить встречу: ${l.owner?.name || l.company}`, d: `Ответ: «${(l.lastReply?.text || '').slice(0, 80)}»`, href: leadHash(l.id), btn: 'Назначить', warn: true });
-  for (const m of meetings.filter(m => m.status === 'scheduled').slice(0, 3)) todo.push({ ic: 'file', t: `Встреча ${fmtDate(m.at)} — ${m.lead?.owner || m.lead?.company || ''}`, d: 'Откройте персональный скрипт перед звонком.', href: scriptHash(m.leadId), btn: 'Скрипт' });
-  const stale = leads.filter(l => l.stage === 'contacted' && !l.demo && l.lastTouchAt && now - new Date(l.lastTouchAt) > 3 * 86400000).slice(0, 3);
-  for (const l of stale) todo.push({ ic: 'clock', t: `Дожать: ${l.company}`, d: `Без ответа ${ago(l.lastTouchAt)} — отправьте короткий дожим.`, href: leadHash(l.id), btn: 'Дожим' });
+  for (const l of leads.filter(l => l.stage === 'new').slice(0, 3)) todo.push({ ic: 'search', t: `Исследовать «${l.company}»`, d: `Откуда: ${l.vacancy?.title || l.source}. Оценка ${l.score}.`, href: leadHash(l.id), btn: 'Исследовать', lid: l.id, pr: 1 });
+  for (const l of leads.filter(l => l.stage === 'researched').slice(0, 3)) todo.push({ ic: 'mail', t: `Написать ${l.owner?.name || 'собственнику'} · ${l.company}`, d: `${l.factsCount ?? l.facts?.length ?? 0} фактов собрано${l.owner?.style?.ok ? ', стиль собственника известен' : ''}.`, href: leadHash(l.id), btn: 'Написать', lid: l.id, pr: 2 });
+  for (const l of leads.filter(l => l.stage === 'replied' && !l.demo).slice(0, 3)) todo.push({ ic: 'calendar', t: `Назначить встречу: ${l.owner?.name || l.company}`, d: `Ответ: «${(l.lastReply?.text || '').slice(0, 80)}»`, href: leadHash(l.id), btn: 'Назначить', warn: true, lid: l.id, pr: 5 });
+  for (const m of meetings.filter(m => m.status === 'scheduled').slice(0, 3)) todo.push({ ic: 'file', t: `Встреча ${fmtDate(m.at)} — ${m.lead?.owner || m.lead?.company || ''}`, d: 'Откройте персональный скрипт перед звонком.', href: scriptHash(m.leadId), btn: 'Скрипт', lid: m.leadId, pr: 4 });
+  for (const l of leads.filter(l => l.stage === 'contacted' && !l.demo && l.lastTouchAt && now - new Date(l.lastTouchAt) > 3 * 86400000).slice(0, 3)) todo.push({ ic: 'clock', t: `Дожать: ${l.company}`, d: `Без ответа ${ago(l.lastTouchAt)} — отправьте короткий дожим.`, href: leadHash(l.id), btn: 'Дожим', lid: l.id, pr: 3 });
+  const avg = a.actual?.avgCheckRub || 200000;
+  const open = new Map((Array.isArray(deals) ? deals : []).filter(d => d.status === 'open').map(d => [d.leadId, d.amountRub]));
+  for (const t of todo) { const x = open.get(t.lid); t.real = x != null; t.rub = t.real ? x : Math.round(avg * (STAGE_WIN[t.pr] || 0.05) / 1e4) * 1e4; }
+  todo.sort((x, y) => y.pr - x.pr || y.rub - x.rub);
+  const first = todo[0];
+  const stake = todo.reduce((s, t) => s + t.rub, 0);
   const leader = exps.find(e => e.status === 'running');
   const f = a.funnel; const top = Math.max(1, f[0].n);
   el.innerHTML = `
-    <div class="page-head"><div><h1>Пульт</h1><p>Что сделать сейчас, чтобы дойти до встречи. Деньги — в рублях и в долларах по курсу ${esc(String(a.usdRate))} ₽.</p></div>
+    <div class="page-head"><div><h1>Пульт</h1><p>Одно главное дело на сейчас. Остальное — ниже, если нужно.</p></div>
       <div class="row"><a class="btn" href="#queue">${icon('send')}Конвейер</a><a class="btn primary" href="#signals" data-tour="find-signals">${icon('radar')}Найти собственников</a></div></div>
-    <div class="grid g4" data-tour="kpis">
-      <div class="card kpi"><span class="label">Выручка ${hint('Сумма выигранных сделок. В скобках — в долларах по курсу из Настроек.')}</span><b>${money(a.revenueRub, { usd: false })}</b><span class="usd">${usd(a.revenueRub)}</span></div>
-      <div class="card kpi"><span class="label">В работе</span><b>${money(a.pipelineRub, { usd: false })}</b><span class="usd">открытые сделки</span></div>
-      <div class="card kpi"><span class="label">Встречи назначены</span><b>${a.meetingsScheduled}</b><span class="usd">лид → встреча: ${pct(a.conversion.leadToMeeting)}</span></div>
-      <div class="card kpi"><span class="label">Ответы на касание</span><b>${pct(a.conversion.contactToReply)}</b><span class="usd">встреча → сделка: ${pct(a.conversion.meetingToDeal)}</span></div>
+    <div id="setup-box"></div>
+    ${first ? `<div class="card hero-todo" data-tour="todo">
+      <span class="label">Следующее действие, которое принесёт деньги</span>
+      <div class="hero-row">
+        <span class="ico big ${first.warn ? 'warn' : ''}">${icon(first.ic)}</span>
+        <div class="body"><div class="hero-title">${esc(first.t)}</div><div class="mute">${esc(first.d)}</div></div>
+        <div class="hero-sum"><div class="xs mute">в игре${first.real ? '' : ' (оценка)'}</div><b>${money(first.rub, { usd: false })}</b><span class="xs mute">${usd(first.rub)}</span></div>
+      </div>
+      <a class="btn primary hero-btn" href="${first.href}">Сделать сейчас →</a></div>`
+    : '<div class="card" data-tour="todo"><div class="empty">Все дела выполнены. Найдите новых собственников: hh.ru, карты, другие площадки.</div></div>'}
+    <div class="grid g3" data-tour="kpis">
+      <div class="card kpi"><span class="label">Денег на кону сегодня ${hint('Сумма по всем делам в очереди: по открытым сделкам — их сумма, по остальным — оценка (средний чек × вероятность этапа).')}</span><b>${money(stake, { usd: false })}</b><span class="usd">${usd(stake)} · ${todo.length} дел в очереди</span></div>
+      <div class="card kpi"><span class="label">Уже в работе</span><b>${money(a.pipelineRub, { usd: false })}</b><span class="usd">${usd(a.pipelineRub)} · открытые сделки</span></div>
+      <div class="card kpi"><span class="label">Заработано</span><b>${money(a.revenueRub, { usd: false })}</b><span class="usd">${usd(a.revenueRub)} · встреч назначено: ${a.meetingsScheduled}</span></div>
     </div>
-    <div class="split">
-      <div class="card" data-tour="todo"><div class="card-head"><h3>Следующие действия</h3>${hint('Система сама собирает задачи: новые сигналы, кому написать, кому назначить встречу, к какой встрече открыть скрипт и кого дожать.')}</div>
-        <div class="list">${todo.length ? todo.slice(0, 8).map(t => `<div class="item"><span class="ico ${t.warn ? 'warn' : ''}">${icon(t.ic)}</span><div class="body"><div class="title">${esc(t.t)}</div><div class="small mute">${esc(t.d)}</div></div><a class="btn sm" href="${t.href}">${t.btn}</a></div>`).join('') : '<div class="empty">Все задачи выполнены. Найдите новые сигналы на hh.ru.</div>'}</div></div>
+    ${todo.length > 1 ? `<div class="card"><div class="card-head"><h3>Дальше по очереди</h3></div>
+      <div class="list">${todo.slice(1, 6).map(t => `<div class="item"><span class="ico ${t.warn ? 'warn' : ''}">${icon(t.ic)}</span><div class="body"><div class="title">${esc(t.t)}</div><div class="small mute">${esc(t.d)}</div></div><span class="small num mute">${money(t.rub, { usd: false })}</span><a class="btn sm" href="${t.href}">${t.btn}</a></div>`).join('')}</div></div>` : ''}
+    <details class="more" data-tour="funnel"><summary>Подробная аналитика: воронка, автопилот, A/B</summary>
       <div class="stack">
-        <div class="card" data-tour="funnel"><div class="card-head"><h3>Воронка</h3><span class="xs mute">конверсия из предыдущего этапа</span></div>
-          <div class="funnel">${f.map((s, i) => `<div class="funnel-row st-${s.stage}"><span>${esc(s.name)}</span><div class="track"><i style="width:${(s.n / top) * 100}%"></i></div><b>${s.n}</b><span class="conv">${i ? pct(f[i - 1].n ? (s.n / f[i - 1].n) * 100 : 0) : ''}</span></div>`).join('')}</div></div>
+        <div class="card"><div class="card-head"><h3>Воронка</h3><span class="xs mute">конверсия из предыдущего этапа</span></div>
+          <div class="funnel">${f.map((s, i) => `<div class="funnel-row st-${s.stage}"><span>${esc(s.name)}</span><div class="track"><i style="width:${(s.n / top) * 100}%"></i></div><b>${s.n}</b><span class="conv">${i ? pct(f[i - 1].n ? (s.n / f[i - 1].n) * 100 : 0) : ''}</span></div>`).join('')}</div>
+          <p class="xs mute">Лид → встреча: ${pct(a.conversion.leadToMeeting)} · ответы на касание: ${pct(a.conversion.contactToReply)} · встреча → сделка: ${pct(a.conversion.meetingToDeal)}</p></div>
         <div id="ap-box"></div>
         ${leader ? `<div class="card"><div class="card-head"><h3>A/B: ${esc(leader.name)}</h3><a class="btn sm ghost" href="#experiments">Подробнее</a></div>
           <div class="list">${leader.stats.rows.map(r => `<div class="item"><div class="body"><div class="title">${esc(r.name)} <span class="mute small">· ${esc(hookName(r.hook))}</span></div><div class="bar ${r.id === leader.stats.leader ? 'ok' : ''}" style="margin-top:6px"><i style="width:${r.pBest}%"></i></div></div><div class="small num" style="text-align:right">${pct(r.rate)}<br><span class="mute xs">лучший с P=${pct(r.pBest)}</span></div></div>`).join('')}</div>
           <p class="xs mute">${leader.stats.winner ? 'Победитель определён — масштабируйте этот заход.' : `Нужно ещё ${leader.stats.moreTouchesNeeded} касаний на вариант для уверенного вывода.`}</p></div>` : ''}
-      </div>
-    </div>`;
-  if (S.boot.role === 'owner') { const box = $('#ap-box'); box.innerHTML = await autopilotCard(); bindAutopilot(box); }
+      </div></details>
+    ${hireCard()}`;
+  bindHire(el);
+  if (S.boot.role === 'owner') {
+    const box = $('#ap-box'); box.innerHTML = await autopilotCard(); bindAutopilot(box);
+    await setupBanners($('#setup-box'));
+  }
 }
 
-// ====================== СИГНАЛЫ HH ======================
+/** Плашки «что подключить»: коротко, со ссылкой на раздел, закрываются крестиком навсегда. */
+async function setupBanners(box) {
+  const r = await call('GET', '/setup').catch(() => null);
+  if (!r || !r.items.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="banners">${r.items.slice(0, 3).map(i => `<div class="banner" data-id="${esc(i.id)}"><div><b>${esc(i.title)}</b><span class="small mute">${esc(i.text)}</span></div><a class="btn sm" href="#${esc(i.view)}">Подключить</a><button class="btn sm ghost" data-dismiss="${esc(i.id)}" aria-label="Скрыть">✕</button></div>`).join('')}
+    <div class="xs mute">Готово ${r.done} из ${r.total}${r.items.length > 3 ? ` · ещё ${r.items.length - 3}` : ''} · <button class="linklike" data-dismiss="*">скрыть все</button></div></div>`;
+  box.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-dismiss]'); if (!b) return;
+    await act(() => call('POST', '/setup/dismiss', { id: b.dataset.dismiss }));
+    await setupBanners(box);
+  }, { once: true });
+}
+
+/** Внизу пульта: заказать человека и стать агентом — в два касания. */
+export function hireCard() {
+  return `<div class="card hire" data-tour="hire"><div class="card-head"><h3>Нужны люди или партнёрство?</h3></div>
+    <div class="hire-grid">
+      <button class="btn" data-order="hire_sales">${icon('users')}Нанять продажника</button>
+      <button class="btn" data-order="hire_rop">${icon('users')}Нанять РОПа</button>
+      <button class="btn" data-order="replace_rop">${icon('users')}Заменить РОПа</button>
+      <button class="btn primary" data-agent>${icon('spark')}Стать агентом</button>
+    </div></div>`;
+}
+const ORDER_TEXT = { hire_sales: ['Нанять продажника', 'Подберём и введём в работу менеджера по продажам под ваш план.'], hire_rop: ['Нанять РОПа', 'Найдём руководителя отдела продаж, который построит систему без вас.'], replace_rop: ['Заменить РОПа', 'Аудит текущего РОПа и замена без провала плана.'] };
+export function bindHire(root) {
+  root.querySelectorAll('[data-order]').forEach(b => b.addEventListener('click', () => {
+    const [title, text] = ORDER_TEXT[b.dataset.order];
+    const m = modal(`<h2>${esc(title)}</h2><p class="mute">${esc(text)}</p>
+      <form id="order-f" class="stack"><label class="field"><span>Как с вами связаться</span><input name="contact" required placeholder="Telegram, телефон или email" value="${esc(S.boot.user?.email || '')}"></label>
+      <label class="field"><span>Что важно (необязательно)</span><textarea name="details" rows="3" placeholder="Ниша, город, план продаж, сроки"></textarea></label>
+      <div class="row"><button class="btn primary">Отправить заявку</button><button class="btn ghost" type="button" data-close>Отмена</button></div></form>`);
+    m.el.querySelector('#order-f').addEventListener('submit', async (e) => { e.preventDefault(); const f = formData(e.target); const r = await act(() => call('POST', '/orders', { kind: b.dataset.order, contact: f.contact, details: f.details })); if (r) { toast(r.text); m.close(); } });
+  }));
+  root.querySelector('[data-agent]')?.addEventListener('click', async () => {
+    const r = await act(() => call('GET', '/referral')); if (!r) return;
+    const link = (S.boot.baseUrl || (S.api.mode === 'server' ? location.origin : 'https://ваш-домен.ru')) + r.path; // в демо домена нет
+    const m = modal(`<h2>Стать агентом</h2><p>Рекомендуйте LEADMEET OS собственникам и агентствам — получайте <b>${r.percent}%</b> с каждой их оплаты.</p>
+      <label class="field"><span>Ваша ссылка</span><input readonly value="${esc(link)}"></label>
+      <div class="grid g3"><div class="kpi"><span class="label">Пришло</span><b>${r.invited}</b></div><div class="kpi"><span class="label">Оплатили</span><b>${money(r.paidRub, { usd: false })}</b></div><div class="kpi"><span class="label">Ваши</span><b>${money(r.earnedRub, { usd: false })}</b></div></div>
+      <div class="row"><button class="btn primary" data-copy>Скопировать ссылку</button><button class="btn ghost" data-close>Закрыть</button></div>`);
+    m.el.querySelector('[data-copy]').addEventListener('click', () => copy(link));
+  });
+}
+
+// ====================== ПОИСК ЛИДОВ ======================
 export async function viewSignals(el) {
   const st = S.boot.settings.hh;
   el.innerHTML = `
-    <div class="page-head"><div><h1>Сигналы HH</h1><p>Компании, которые ищут топ-позиции, где кандидатов отбирает сам собственник: коммерческий директор, РОП, исполнительный директор, ассистент собственника. Вакансия даёт повод для разговора и показывает, где болит.</p></div></div>
+    <div class="page-head"><div><h1>Поиск лидов на hh.ru</h1><p>Компании, которые ищут топ-позиции, где кандидатов отбирает сам собственник: коммерческий директор, РОП, исполнительный директор, ассистент собственника. Вакансия даёт повод для разговора и показывает, где болит.</p></div></div>
     <form class="card" id="hh-form" data-tour="hh-form">
       <div class="form-grid">
         <label class="field" style="grid-column:1/-1"><span>Должности (по одной в строке) ${hint('Ищем вакансии, на которые кандидатов отбирает первое лицо. Добавьте свои — например «директор по маркетингу» или «CTO» для IT-ниши.')}</span><textarea id="hh-roles" name="roles" rows="3">${esc(st.roles.join('\n'))}</textarea></label>
@@ -120,8 +185,8 @@ export async function viewLeads(el) {
   const stages = S.boot.catalog.stages;
   let filter = sessionStorageGet('lm-stage') || 'all', q = '';
   el.innerHTML = `
-    <div class="page-head"><div><h1>Лиды</h1><p>Каждый собственник проходит путь: сигнал → исследование → касание → ответ → встреча → сделка. Всего: ${stats.total}.</p></div>
-      <div class="row"><input id="lead-q" placeholder="Поиск: компания, имя, вакансия" style="width:260px"><a class="btn primary" href="#signals">${icon('plus')}Новые сигналы</a></div></div>
+    <div class="page-head"><div><h1>Лиды</h1><p>Каждый собственник проходит путь: новый лид → исследование → касание → ответ → встреча → сделка. Всего: ${stats.total}.</p></div>
+      <div class="row"><input id="lead-q" placeholder="Поиск: компания, имя, вакансия" style="width:260px"><a class="btn primary" href="#signals">${icon('plus')}Найти лидов</a></div></div>
     <div class="stage-strip" id="stage-strip" data-tour="stage-strip">
       ${stages.map(s => `<button data-st="${s.id}" class="st-${s.id}"><span class="pill st-${s.id}" style="border:0;background:none;padding:0">${esc(s.name)}</span><b>${stats.byStage[s.id] || 0}</b></button>`).join('')}
     </div>

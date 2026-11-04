@@ -50,6 +50,13 @@ const EXAMPLE = [
 
 let state = null;
 
+// Ручной переход в другой раздел во время обучения закрывает подсказки, чтобы они не висели на чужом экране.
+window.addEventListener('hashchange', () => {
+  if (!state) return;
+  if (state.navigating) { state.navigating = false; return; }
+  endTour();
+});
+
 export async function startTour(kind = 'main') {
   endTour();
   const steps = kind === 'example' ? EXAMPLE : MAIN;
@@ -86,7 +93,7 @@ async function show() {
   const st = state.steps[state.i];
   const hash = resolveHash(st.hash);
   if (hash === null) return next(1);
-  if (hash && location.hash !== hash) location.hash = hash;
+  if (hash && location.hash !== hash) { state.navigating = true; location.hash = hash; }
   if (window.innerWidth <= 860 && st.sel === 'rail') document.getElementById('rail')?.classList.add('open');
   const target = await waitFor(st.sel);
   if (!state) return;

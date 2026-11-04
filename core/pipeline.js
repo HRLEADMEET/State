@@ -271,9 +271,12 @@ export function registerPipeline(R, H) {
 
   // ---- лёгкие счётчики для меню ----
   R('GET', '/counts', null, async (ctx) => {
-    const [leads, meetings, msgs] = await Promise.all([list(ctx, 'leads'), list(ctx, 'meetings'), list(ctx, 'messages')]);
-    const ws = await ctx.store.getWorkspace(ctx.ws.id);
-    return { leads: leads.filter(l => !['won', 'lost'].includes(l.stage)).length, meetings: meetings.filter(m => m.status === 'scheduled').length, queue: msgs.filter(m => m.status === 'approved').length, credits: ws?.credits ?? 0 };
+    const st = ctx.store;
+    const count = async (coll, f) => { if (st.countBy) return st.countBy(ctx.ws.id, coll); const o = {}; for (const d of await list(ctx, coll)) o[d[f]] = (o[d[f]] || 0) + 1; return o; };
+    const [leads, meetings, msgs] = await Promise.all([count('leads', 'stage'), count('meetings', 'status'), count('messages', 'status')]);
+    const ws = await st.getWorkspace(ctx.ws.id);
+    const sum = (o, skip = []) => Object.entries(o).filter(([k]) => !skip.includes(k)).reduce((a, [, n]) => a + n, 0);
+    return { leads: sum(leads, ['won', 'lost']), meetings: meetings.scheduled || 0, queue: msgs.approved || 0, credits: ws?.credits ?? 0 };
   });
 
   return { prepareQueue, runAutopilot, autopilotTick, syncHh, capsToday, stageIndex };

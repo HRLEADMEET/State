@@ -36,8 +36,10 @@ export function parseTranscript(text = '') {
   return turns;
 }
 
+export const MAX_TRANSCRIPT_CHARS = 300_000; // ~4–5 часов разговора; больше — обрезаем, чтобы один запрос не останавливал сервер
+
 export function analyzeCall(text, { me = ['влад', 'я', 'менеджер', 'консультант', 'продавец', 'speaker 1', 'спикер 1'] } = {}) {
-  const turns = parseTranscript(text);
+  const turns = parseTranscript(String(text || '').slice(0, MAX_TRANSCRIPT_CHARS)).slice(0, 6000);
   if (!turns.length) return { ok: false, reason: 'Пустая расшифровка.' };
   const speakers = [...new Set(turns.map(t => t.speaker))];
   const meLabels = me.map(x => x.toLowerCase());
@@ -46,6 +48,9 @@ export function analyzeCall(text, { me = ['влад', 'я', 'менеджер', 
   const wc = (s) => s.split(/\s+/).filter(Boolean).length;
   let myWords = 0, theirWords = 0, myQuestions = 0, longest = 0;
   const stagesHit = {}; const objections = []; const pains = []; const quotes = [];
+  // Индекс следующей реплики «моей» стороны — за один проход с конца (O(n) вместо O(n²)).
+  const nextMine = new Array(turns.length).fill(-1);
+  for (let j = turns.length - 2; j >= 0; j--) nextMine[j] = turns[j + 1].speaker === mine ? j + 1 : nextMine[j + 1];
   turns.forEach((t, i) => {
     const w = wc(t.text); const low = t.text.toLowerCase();
     if (t.speaker === mine) {
@@ -54,8 +59,8 @@ export function analyzeCall(text, { me = ['влад', 'я', 'менеджер', 
       for (const [st, res] of Object.entries(STAGE_SIGNALS)) if (res.some(r => r.test(low))) stagesHit[st] = (stagesHit[st] || 0) + 1;
     } else {
       theirWords += w;
-      for (const [id, re] of Object.entries(OBJ_SIGNALS)) if (re.test(low)) {
-        const reply = turns.slice(i + 1).find(x => x.speaker === mine);
+      for (const [id, re] of Object.entries(OBJ_SIGNALS)) if (objections.length < 50 && re.test(low)) {
+        const reply = nextMine[i] >= 0 ? turns[nextMine[i]] : null;
         objections.push({ id, text: t.text, handled: !!reply && wc(reply.text) > 8 && /\?/.test(reply.text), reply: reply?.text || '' });
       }
       if (PAIN_RE.test(t.text)) pains.push(t.text);

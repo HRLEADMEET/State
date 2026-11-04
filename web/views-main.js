@@ -15,7 +15,7 @@ export async function viewDashboard(el) {
   const todo = [];
   const fresh = leads.filter(l => l.stage === 'new').slice(0, 3);
   for (const l of fresh) todo.push({ ic: 'search', t: `Исследовать «${l.company}»`, d: `Сигнал: ${l.vacancy?.title || l.source}. Оценка ${l.score}.`, href: leadHash(l.id), btn: 'Исследовать' });
-  for (const l of leads.filter(l => l.stage === 'researched').slice(0, 3)) todo.push({ ic: 'mail', t: `Написать ${l.owner?.name || 'собственнику'} · ${l.company}`, d: `${l.facts?.length || 0} фактов собрано${l.owner?.style?.ok ? ', стиль собственника известен' : ''}.`, href: leadHash(l.id), btn: 'Написать' });
+  for (const l of leads.filter(l => l.stage === 'researched').slice(0, 3)) todo.push({ ic: 'mail', t: `Написать ${l.owner?.name || 'собственнику'} · ${l.company}`, d: `${l.factsCount ?? l.facts?.length ?? 0} фактов собрано${l.owner?.style?.ok ? ', стиль собственника известен' : ''}.`, href: leadHash(l.id), btn: 'Написать' });
   for (const l of leads.filter(l => l.stage === 'replied' && !l.demo).slice(0, 3)) todo.push({ ic: 'calendar', t: `Назначить встречу: ${l.owner?.name || l.company}`, d: `Ответ: «${(l.lastReply?.text || '').slice(0, 80)}»`, href: leadHash(l.id), btn: 'Назначить', warn: true });
   for (const m of meetings.filter(m => m.status === 'scheduled').slice(0, 3)) todo.push({ ic: 'file', t: `Встреча ${fmtDate(m.at)} — ${m.lead?.owner || m.lead?.company || ''}`, d: 'Откройте персональный скрипт перед звонком.', href: scriptHash(m.leadId), btn: 'Скрипт' });
   const stale = leads.filter(l => l.stage === 'contacted' && !l.demo && l.lastTouchAt && now - new Date(l.lastTouchAt) > 3 * 86400000).slice(0, 3);
@@ -116,26 +116,34 @@ function renderHhResults(r, niche) {
 
 // ====================== ЛИДЫ ======================
 export async function viewLeads(el) {
-  const all = await call('GET', '/leads');
+  const stats = await call('GET', '/leads/stats');
   const stages = S.boot.catalog.stages;
   let filter = sessionStorageGet('lm-stage') || 'all', q = '';
   el.innerHTML = `
-    <div class="page-head"><div><h1>Лиды</h1><p>Каждый собственник проходит путь: сигнал → исследование → касание → ответ → встреча → сделка.</p></div>
+    <div class="page-head"><div><h1>Лиды</h1><p>Каждый собственник проходит путь: сигнал → исследование → касание → ответ → встреча → сделка. Всего: ${stats.total}.</p></div>
       <div class="row"><input id="lead-q" placeholder="Поиск: компания, имя, вакансия" style="width:260px"><a class="btn primary" href="#signals">${icon('plus')}Новые сигналы</a></div></div>
     <div class="stage-strip" id="stage-strip" data-tour="stage-strip">
-      ${stages.map(s => `<button data-st="${s.id}" class="st-${s.id}"><span class="pill st-${s.id}" style="border:0;background:none;padding:0">${esc(s.name)}</span><b>${all.filter(l => l.stage === s.id).length}</b></button>`).join('')}
+      ${stages.map(s => `<button data-st="${s.id}" class="st-${s.id}"><span class="pill st-${s.id}" style="border:0;background:none;padding:0">${esc(s.name)}</span><b>${stats.byStage[s.id] || 0}</b></button>`).join('')}
     </div>
-    <div class="table-wrap"><table><thead><tr><th>Компания</th><th>Собственник</th><th>Сигнал</th><th class="n">Оценка</th><th>Этап</th><th>Источник</th></tr></thead><tbody id="lead-rows"></tbody></table></div>`;
-  const draw = () => {
-    let ls = filter === 'all' ? all : all.filter(l => l.stage === filter);
-    if (q) ls = ls.filter(l => JSON.stringify([l.company, l.owner?.name, l.vacancy?.title]).toLowerCase().includes(q));
+    <div class="table-wrap"><table><thead><tr><th>Компания</th><th>Собственник</th><th>Сигнал</th><th class="n">Оценка</th><th>Этап</th><th>Источник</th></tr></thead><tbody id="lead-rows"></tbody></table></div>
+    <p class="xs mute" id="lead-more"></p>`;
+  let seq = 0;
+  const draw = async () => {
+    const my = ++seq;
     $$('#stage-strip button').forEach(b => b.classList.toggle('on', b.dataset.st === filter));
+    const params = new URLSearchParams({ limit: '300' });
+    if (filter !== 'all') params.set('stage', filter);
+    if (q) params.set('q', q);
+    const ls = await call('GET', '/leads?' + params);
+    if (my !== seq || !$('#lead-rows')) return;
     $('#lead-rows').innerHTML = ls.map(l => `<tr class="click" data-id="${esc(l.id)}"><td><b>${esc(l.company || '—')}</b>${l.demo ? ' <span class="tag">история</span>' : ''}${l.optOut ? ' <span class="tag bad">отписан</span>' : ''}</td><td>${esc(l.owner?.name || '—')}</td><td class="small">${esc(l.vacancy?.title || l.notes?.slice(0, 50) || '—')}</td><td class="n">${l.score ?? ''}</td><td>${stagePill(l.stage)}</td><td class="small mute">${esc(String(l.source || '').replace('inbound:', 'заявка · '))}</td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">Нет лидов на этом этапе.</div></td></tr>';
+    $('#lead-more').textContent = ls.length >= 300 ? 'Показаны 300 лучших по оценке — уточните поиск или этап.' : '';
   };
+  let t = null;
   $('#stage-strip').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; filter = filter === b.dataset.st ? 'all' : b.dataset.st; sessionStorageSet('lm-stage', filter); draw(); });
-  $('#lead-q').addEventListener('input', (e) => { q = e.target.value.toLowerCase(); draw(); });
+  $('#lead-q').addEventListener('input', (e) => { q = e.target.value.toLowerCase(); clearTimeout(t); t = setTimeout(draw, 250); });
   $('#lead-rows').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) go(leadHash(tr.dataset.id)); });
-  draw();
+  await draw();
 }
 function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
 function sessionStorageSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignore */ } }

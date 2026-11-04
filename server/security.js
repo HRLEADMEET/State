@@ -92,13 +92,20 @@ export const newTotpSecret = () => base32(crypto.randomBytes(20));
 
 // ---- ограничение частоты (защита от перебора паролей и злоупотреблений) ----
 export class RateLimiter {
-  constructor(limit, windowMs) { this.limit = limit; this.windowMs = windowMs; this.hits = new Map(); }
+  constructor(limit, windowMs, maxKeys = 100_000) { this.limit = limit; this.windowMs = windowMs; this.maxKeys = maxKeys; this.hits = new Map(); this.lastSweep = 0; }
   hit(key) {
     const now = Date.now();
     const arr = (this.hits.get(key) || []).filter(t => now - t < this.windowMs);
-    arr.push(now); this.hits.set(key, arr);
-    if (this.hits.size > 50000) this.hits.clear();
+    arr.push(now);
+    this.hits.delete(key); this.hits.set(key, arr); // свежие ключи — в конец (порядок вставки = LRU)
+    if (this.hits.size > this.maxKeys || now - this.lastSweep > this.windowMs) this.sweep(now);
     return arr.length <= this.limit;
+  }
+  /** Удаляем только истёкшие записи и самые старые ключи — счётчики активных атакующих не обнуляются. */
+  sweep(now = Date.now()) {
+    this.lastSweep = now;
+    for (const [k, arr] of this.hits) if (!arr.length || now - arr[arr.length - 1] >= this.windowMs) this.hits.delete(k);
+    while (this.hits.size > this.maxKeys) this.hits.delete(this.hits.keys().next().value);
   }
 }
 

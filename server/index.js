@@ -24,7 +24,7 @@ const WEB = path.join(ROOT, 'web');
 const loginLimiter = new RateLimiter(10, 15 * 60_000);
 const loginEmailLimiter = new RateLimiter(20, 60 * 60_000);
 const DUMMY_HASH = hashPassword('dummy-password-for-timing');
-const apiLimiter = new RateLimiter(600, 60_000);
+const apiLimiter = new RateLimiter(Number(process.env.API_RATE_LIMIT || 600), 60_000);
 const hookLimiter = new RateLimiter(60, 60_000);
 
 // ---------- channel config with unsealed secrets ----------
@@ -89,7 +89,7 @@ function realServices(ctx) {
 
 function makeCtx(sess, user, role) {
   const ws = store.getWorkspace(sess.ws);
-  const ctx = { store, ws, user, role, demo: config.demoMode, workspaces: store.workspacesOf(user.id).map(w => ({ id: w.id, name: w.name, kind: w.kind, role: w.role })) };
+  const ctx = { store, ws, user, role, demo: config.demoMode && !!ws?.demo, workspaces: store.workspacesOf(user.id).map(w => ({ id: w.id, name: w.name, kind: w.kind, role: w.role })) };
   ctx.services = services(ctx);
   ctx.audit = async (e) => store.audit(e);
   ctx.onWorkspaceCreated = async (w) => { store.addMember(w.id, user.id, 'owner'); };
@@ -132,7 +132,7 @@ async function readJson(req, limit) {
 }
 
 function cookies(req) {
-  return Object.fromEntries((req.headers.cookie || '').split(/;\s*/).filter(Boolean).map(c => { const i = c.indexOf('='); return [c.slice(0, i), decodeURIComponent(c.slice(i + 1))]; }));
+  return Object.fromEntries((req.headers.cookie || '').split(/;\s*/).filter(Boolean).map(c => { const i = c.indexOf('='); let v = c.slice(i + 1); try { v = decodeURIComponent(v); } catch { v = ''; } return [c.slice(0, i), v]; }));
 }
 function setCookie(name, value, { maxAge, httpOnly = true } = {}) {
   return `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax${httpOnly ? '; HttpOnly' : ''}${config.secureCookies ? '; Secure' : ''}${maxAge !== undefined ? '; Max-Age=' + maxAge : ''}`;
@@ -182,7 +182,7 @@ async function authRoute(req, res, sub) {
     const email = String(body.email || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'Укажите корректный email.');
     if (store.countUsers() > 0 && !config.allowSignup && !body.invite) throw new HttpError(403, 'Регистрация закрыта. Попросите приглашение у владельца.');
-    if (store.userByEmail(email)) throw new HttpError(409, 'Такой email уже зарегистрирован.');
+    if (store.userByEmail(email)) throw new HttpError(400, 'Не получилось зарегистрироваться с этим email. Если аккаунт уже есть — войдите.');
     const probs = passwordProblems(body.password || '');
     if (probs.length) throw new HttpError(400, 'Пароль: ' + probs.join(', ') + '.');
     if (body.invite) {
@@ -474,7 +474,21 @@ async function ensureDemo() {
   console.log('[demo] Демо-кабинет создан с тестовой воронкой.');
 }
 
+/** Один процесс на одну базу: второй экземпляр задвоил бы рассылки и бэкапы. */
+function acquireLock() {
+  const lock = path.join(config.dataDir, 'leadmeet.lock');
+  try {
+    const pid = Number(fs.readFileSync(lock, 'utf8'));
+    if (pid && pid !== process.pid) { try { process.kill(pid, 0); throw new Error(`Уже запущен другой экземпляр (PID ${pid}) с этой папкой данных: ${config.dataDir}`); } catch (e) { if (e.code !== 'ESRCH') throw e; } }
+  } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  fs.writeFileSync(lock, String(process.pid));
+  const release = () => { try { if (Number(fs.readFileSync(lock, 'utf8')) === process.pid) fs.unlinkSync(lock); } catch { /* уже удалён */ } };
+  process.on('exit', release);
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { release(); process.exit(0); });
+}
+
 export async function start(port = config.port) {
+  acquireLock();
   await ensureDemo();
   store.purgeSessions();
   setInterval(() => emailTick().catch(e => console.warn('[email tick]', e.message)), 60_000).unref();

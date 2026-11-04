@@ -13,7 +13,7 @@ const SOCIAL = [
 ];
 
 export function parseSite(html = '', url = '') {
-  const h = String(html).slice(0, 800_000); // ограничение защищает регулярки от патологически больших страниц
+  const h = String(html).slice(0, 400_000); // ограничение защищает регулярки и поток событий от больших страниц
   const meta = (name) => (h.match(new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]*content=["']([^"']+)`, 'i')) || h.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*(?:name|property)=["']${name}["']`, 'i')) || [])[1] || '';
   const title = stripHtml((h.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
   const description = stripHtml(meta('description') || meta('og:description'));

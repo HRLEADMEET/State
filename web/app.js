@@ -126,7 +126,8 @@ function renderShell() {
   const b = S.boot;
   const app = document.getElementById('app');
   const isObserver = b.role === 'observer';
-  const nav = NAV.filter(n => n.sep || !isObserver || OBSERVER_VIEWS.includes(n.id));
+  const OWNER_ONLY = ['channels', 'cabinets', 'security', 'prefs', 'launch', 'pack'];
+  const nav = NAV.filter(n => n.sep || (isObserver ? OBSERVER_VIEWS.includes(n.id) : (b.role === 'owner' || !OWNER_ONLY.includes(n.id))));
   app.innerHTML = `
   <div class="shell">
     <aside class="rail" id="rail" data-tour="rail">

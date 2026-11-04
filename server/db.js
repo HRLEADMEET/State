@@ -5,6 +5,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { uid, nowIso } from '../core/util.js';
 import { chainHash } from './security.js';
+import { leadSummary, statusKey } from '../core/summary.js';
 
 export function openDb(file = path.join(config.dataDir, 'leadmeet.db')) {
   const db = new DatabaseSync(file);
@@ -22,17 +23,61 @@ export function openDb(file = path.join(config.dataDir, 'leadmeet.db')) {
     CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, ws TEXT, user TEXT, action TEXT NOT NULL, data TEXT, prev TEXT NOT NULL, hash TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
   `);
+  // Миграция: быстрые колонки для списков и подсчётов (старые базы дополняются при чтении).
+  const cols = db.prepare('PRAGMA table_info(docs)').all().map(c => c.name);
+  if (!cols.includes('k1')) db.exec('ALTER TABLE docs ADD COLUMN k1 TEXT');
+  if (!cols.includes('summary')) db.exec('ALTER TABLE docs ADD COLUMN summary TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS docs_ws_coll_k1 ON docs (ws, coll, k1)');
   return db;
 }
 
+const FIELD_RE = /^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$/;
+
 export class SqliteStore {
-  constructor(db) { this.db = db; this._stmts = {}; }
+  constructor(db) { this.db = db; this._stmts = {}; this._ver = new Map(); }
+  /** Счётчик изменений кабинета: кэши (аналитика, счётчики) пересчитываются только после записи. */
+  version(ws) { return this._ver.get(ws) || 0; }
+  _bump(ws) { this._ver.set(ws, (this._ver.get(ws) || 0) + 1); }
+  /** Лёгкая выборка полей без разбора всего JSON (json_extract в SQLite). fields: { alias: 'путь.к.полю' | {len: 'путь'} } */
+  project(ws, coll, fields) {
+    const cols = Object.entries(fields).map(([alias, f]) => {
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(alias)) throw new Error('bad alias');
+      const pathStr = typeof f === 'string' ? f : f.len;
+      if (!FIELD_RE.test(pathStr)) throw new Error('bad field');
+      return typeof f === 'string' ? `json_extract(data, '$.${pathStr}') AS "${alias}"` : `json_array_length(json_extract(data, '$.${pathStr}')) AS "${alias}"`;
+    }).join(', ');
+    return this.q(`SELECT ${cols} FROM docs WHERE ws = ? AND coll = ?`).all(ws, coll);
+  }
   q(sql) { return (this._stmts[sql] ||= this.db.prepare(sql)); }
 
   list(ws, coll) { return this.q('SELECT data FROM docs WHERE ws = ? AND coll = ?').all(ws, coll).map(r => JSON.parse(r.data)); }
   get(ws, coll, id) { const r = this.q('SELECT data FROM docs WHERE ws = ? AND coll = ? AND id = ?').get(ws, coll, id); return r ? JSON.parse(r.data) : null; }
-  put(ws, coll, doc) { this.q('INSERT INTO docs (ws, coll, id, data, updated) VALUES (?, ?, ?, ?, ?) ON CONFLICT(ws, coll, id) DO UPDATE SET data = excluded.data, updated = excluded.updated').run(ws, coll, doc.id, JSON.stringify(doc), nowIso()); return doc; }
-  del(ws, coll, id) { this.q('DELETE FROM docs WHERE ws = ? AND coll = ? AND id = ?').run(ws, coll, id); }
+  put(ws, coll, doc) {
+    this._bump(ws);
+    const summary = coll === 'leads' ? JSON.stringify(leadSummary(doc)) : null;
+    const k1 = statusKey(doc);
+    this.q('INSERT INTO docs (ws, coll, id, data, updated, k1, summary) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(ws, coll, id) DO UPDATE SET data = excluded.data, updated = excluded.updated, k1 = excluded.k1, summary = excluded.summary')
+      .run(ws, coll, doc.id, JSON.stringify(doc), nowIso(), k1 == null ? null : String(k1), summary);
+    return doc;
+  }
+  /** Сводки лидов без разбора полных карточек; старые строки без сводки дополняются один раз. */
+  summaries(ws, coll = 'leads') {
+    const rows = this.q('SELECT id, summary FROM docs WHERE ws = ? AND coll = ?').all(ws, coll);
+    const out = [];
+    for (const r of rows) {
+      if (r.summary) { out.push(JSON.parse(r.summary)); continue; }
+      const d = this.get(ws, coll, r.id);
+      if (d) { const sm = leadSummary(d); this.q('UPDATE docs SET summary = ?, k1 = ? WHERE ws = ? AND coll = ? AND id = ?').run(JSON.stringify(sm), statusKey(d) == null ? null : String(statusKey(d)), ws, coll, r.id); out.push(sm); }
+    }
+    return out;
+  }
+  /** Подсчёт по этапу/статусу одним SQL-запросом. */
+  countBy(ws, coll) {
+    const out = {};
+    for (const r of this.q('SELECT k1, COUNT(*) n FROM docs WHERE ws = ? AND coll = ? GROUP BY k1').all(ws, coll)) out[r.k1 ?? 'null'] = r.n;
+    return out;
+  }
+  del(ws, coll, id) { this._bump(ws); this.q('DELETE FROM docs WHERE ws = ? AND coll = ? AND id = ?').run(ws, coll, id); }
   findChannelByHookKey(key) { const r = this.q("SELECT ws, data FROM docs WHERE coll = 'channels' AND json_extract(data, '$.hookKey') = ?").get(key); return r ? { ws: r.ws, channel: JSON.parse(r.data) } : null; }
   allOf(coll) { return this.q('SELECT ws, data FROM docs WHERE coll = ?').all(coll).map(r => ({ ws: r.ws, doc: JSON.parse(r.data) })); }
 

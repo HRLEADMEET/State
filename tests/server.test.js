@@ -165,3 +165,58 @@ test('SMTP: инъекция заголовков и команд через а�
   const m = buildMessage({ from: 'a@b.ru', to: 'x@y.ru', subject: 'тема\r\nBcc: v@z.ru', text: 't' });
   assert.doesNotMatch(m.raw, /^Bcc:/m);
 });
+
+test('red-team: роли — наблюдатель не видит ключи каналов и личные настройки', async () => {
+  const inv = await req('POST', '/api/auth/invite', { email: 'obs@test.ru', role: 'observer' });
+  const token = inv.json.link.split('#invite=')[1];
+  const saved = { ...jar };
+  const r = await fetch(base + '/api/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'obs@test.ru', password: 'Observer-pass-2026', invite: token }) });
+  assert.equal(r.status, 200);
+  const cookie = r.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
+  const csrf = decodeURIComponent((cookie.match(/lm_csrf=([^;]+)/) || [])[1] || '');
+  const h = { cookie, 'x-csrf': csrf };
+  assert.equal((await fetch(base + '/api/channels', { headers: h })).status, 403);
+  assert.equal((await fetch(base + '/api/settings', { headers: h })).status, 403);
+  const boot = await (await fetch(base + '/api/bootstrap', { headers: h })).json();
+  assert.equal(boot.role, 'observer');
+  assert.equal(boot.settings.me.email, undefined);
+  assert.equal(boot.settings.playbook, undefined);
+  assert.equal((await fetch(base + '/api/leads', { headers: h })).status, 403);
+  assert.equal((await fetch(base + '/api/investors', { headers: h })).status, 200);
+  Object.assign(jar, saved);
+});
+
+test('red-team: кредиты не покупаются без платёжного шлюза; список лидов — сводка с пагинацией', async () => {
+  const b = await req('POST', '/api/billing/credits', { packId: 'c10000' });
+  assert.equal(b.status, 400);
+  for (let i = 0; i < 5; i++) await req('POST', '/api/leads', { company: 'Пагинация ' + i });
+  const page = await req('GET', '/api/leads?limit=2&offset=1');
+  assert.equal(page.json.length, 2);
+  assert.equal(page.json[0].facts, undefined, 'в списке нет тяжёлых полей');
+});
+
+test('red-team: кривые cookie и проценты в адресе — 400/401, не 500', async () => {
+  const r1 = await fetch(base + '/api/leads', { headers: { cookie: 'lm_sid=%E0%A4%A' } });
+  assert.equal(r1.status, 401);
+  const r2 = await fetch(base + '/%E0%A4%A');
+  assert.equal(r2.status, 400);
+  const r3 = await req('GET', '/api/leads/%E0%A4%A');
+  assert.equal(r3.status, 400);
+});
+
+test('red-team: разбор огромной расшифровки линейный и не вешает сервер', async () => {
+  const { analyzeCall } = await import('../core/callAnalysis.js');
+  const lines = []; for (let i = 0; i < 20000; i++) lines.push(i % 2 ? 'Клиент: дорого, подумаю' : 'Влад: что именно?');
+  const t0 = Date.now(); const a = analyzeCall(lines.join('\n'));
+  assert.ok(Date.now() - t0 < 500, 'анализ должен быть быстрым');
+  assert.ok(a.objections.length <= 50);
+});
+
+test('red-team: подмена X-Forwarded-For не обходит лимит входа (последний тест — блокирует IP)', async () => {
+  let limited = false;
+  for (let i = 0; i < 25 && !limited; i++) {
+    const r = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': `10.0.${i}.${i}` }, body: JSON.stringify({ email: 'nobody' + i + '@test.ru', password: 'x' }) });
+    if (r.status === 429) limited = true;
+  }
+  assert.equal(limited, true);
+});

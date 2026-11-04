@@ -14,6 +14,7 @@ import { funnelModel, payback, saasModel, channelRoi, PAYMENT_TERMS, paymentPlan
 import { parsePeople } from './research.js';
 import { DEFAULT_FILTERS } from './hhSignals.js';
 import { registerPipeline } from './pipeline.js';
+import { leadSummary } from './summary.js';
 
 const routes = [];
 const R = (method, path, perm, fn) => {
@@ -90,16 +91,26 @@ R('GET', '/bootstrap', null, async (ctx) => {
   return {
     user: ctx.user && { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name, totp: !!ctx.user.totpEnabled },
     role: ctx.role, roleName: ROLES[ctx.role]?.name,
+    settings: ctx.role === 'owner' ? settings : publicSettings(settings),
     ws: { id: ws.id, name: ws.name, kind: ws.kind, plan: ws.plan, credits: ws.credits, parentId: ws.parentId || null },
     workspaces: ctx.workspaces || [ws],
-    settings,
     llm: !!(ctx.services?.llm?.available && await ctx.services.llm.available(ctx)),
     demo: !!ctx.demo,
     catalog: { plans: PLANS, creditPacks: CREDIT_PACKS, creditCost: CREDIT_COST, channels: CHANNELS, stages: STAGES, niches: NICHES, proofs: PROOFS, hooks: HOOKS, paymentTerms: PAYMENT_TERMS, brand: BRAND, roles: ROLES },
   };
 });
 
-R('GET', '/settings', null, async (ctx) => getSettings(ctx));
+R('GET', '/settings', 'settings', async (ctx) => getSettings(ctx));
+
+/** Настройки для менеджера, клиента и наблюдателя: без email, личных образцов текста, скриптов и лимитов владельца. */
+export function publicSettings(s) {
+  return {
+    id: 'main', me: { name: s.me?.name, title: s.me?.title, telegram: s.me?.telegram }, brand: { name: s.brand?.name }, usdRate: s.usdRate,
+    offers: s.offers, hh: { roles: s.hh?.roles, area: s.hh?.area, salaryFrom: s.hh?.salaryFrom, period: s.hh?.period, minScore: s.hh?.minScore },
+    tz: s.tz, autopilot: { enabled: !!s.autopilot?.enabled, morningHour: s.autopilot?.morningHour, eveningHour: s.autopilot?.eveningHour },
+    onboardingDone: s.onboardingDone, launchDone: s.launchDone,
+  };
+}
 R('PUT', '/settings', 'settings', async (ctx, { body }) => {
   const cur = await getSettings(ctx);
   const next = deepMerge(cur, body);
@@ -112,11 +123,32 @@ R('PUT', '/settings', 'settings', async (ctx, { body }) => {
 });
 
 // ---------- leads ----------
+const leadsCache = new Map(); // ws → { v, list } — отсортированные сводки, пересчёт только после записи
+
+async function sortedSummaries(ctx) {
+  const v = S(ctx).version ? S(ctx).version(ctx.ws.id) : null;
+  const hit = leadsCache.get(ctx.ws.id);
+  if (v !== null && hit && hit.v === v) return hit.list;
+  const list0 = S(ctx).summaries ? await S(ctx).summaries(ctx.ws.id, 'leads') : (await list(ctx, 'leads')).map(leadSummary);
+  list0.sort((a, b) => (b.score || 0) - (a.score || 0) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  if (v !== null) { leadsCache.set(ctx.ws.id, { v, list: list0 }); if (leadsCache.size > 5000) leadsCache.delete(leadsCache.keys().next().value); }
+  return list0;
+}
+
+/** Список лидов — лёгкая сводка (без фактов, истории и постов), фильтры и страница на сервере. */
 R('GET', '/leads', 'leads:read', async (ctx, { query }) => {
-  let leads = await list(ctx, 'leads');
+  let leads = await sortedSummaries(ctx);
   if (query.stage) leads = leads.filter(l => l.stage === query.stage);
-  if (query.q) { const q = String(query.q).toLowerCase(); leads = leads.filter(l => JSON.stringify([l.company, l.owner?.name, l.vacancy?.title, l.city]).toLowerCase().includes(q)); }
-  return leads.sort((a, b) => (b.score || 0) - (a.score || 0) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  if (query.q) { const q = String(query.q).toLowerCase().slice(0, 100); leads = leads.filter(l => [l.company, l.owner?.name, l.vacancy?.title, l.city].join(' ').toLowerCase().includes(q)); }
+  const limit = Math.min(2000, Math.max(1, Number(query.limit) || 300));
+  const offset = Math.max(0, Number(query.offset) || 0);
+  return structuredClone(leads.slice(offset, offset + limit));
+});
+
+/** Количество лидов по этапам — для полосы этапов, без выгрузки списка. */
+R('GET', '/leads/stats', 'leads:read', async (ctx) => {
+  const by = S(ctx).countBy ? await S(ctx).countBy(ctx.ws.id, 'leads') : (await list(ctx, 'leads')).reduce((o, l) => { o[l.stage] = (o[l.stage] || 0) + 1; return o; }, {});
+  return { byStage: by, total: Object.values(by).reduce((a, n) => a + n, 0) };
 });
 
 R('POST', '/leads', 'leads', async (ctx, { body }) => {
@@ -343,7 +375,9 @@ R('POST', '/messages/:id/send', 'messages', async (ctx, { params, body }) => {
       msg.status = 'queued'; msg.queuedAt = nowIso(); await put(ctx, 'messages', msg);
       return { ok: true, queued: true, msg, quota, note: quota.left <= 0 ? 'Дневной лимит прогрева исчерпан — письмо уйдёт в следующее рабочее окно.' : `В очереди: уйдёт в рабочее окно ${settings.sending.windowFrom}:00–${settings.sending.windowTo}:00 с паузой между письмами.` };
     }
-    const res = await ctx.services.mail.send(ctx, { to: msg.to, subject: msg.subject, text: msg.body, leadId: lead.id, msgId: msg.id });
+    let res;
+    try { res = await ctx.services.mail.send(ctx, { to: msg.to, subject: msg.subject, text: msg.body, leadId: lead.id, msgId: msg.id }); }
+    catch (e) { if (e instanceof HttpError) throw e; msg.status = 'error'; msg.error = String(e.message).slice(0, 300); await put(ctx, 'messages', msg); throw new HttpError(502, 'Почтовый сервер не принял письмо: ' + msg.error); }
     msg.status = 'sent'; msg.sentAt = nowIso(); msg.providerId = res?.messageId || null;
   } else {
     // Живое касание с личного аккаунта: отмечаем отправленным, возвращаем ссылку на чат.
@@ -609,8 +643,20 @@ R('PUT', '/deals/:id', 'deals', async (ctx, { params, body }) => {
 });
 
 // ---------- analytics & economics ----------
+const analyticsCache = new Map(); // ws → { v, settingsKey, data } — пересчёт только после изменений в кабинете
+
 R('GET', '/analytics', 'analytics', async (ctx) => {
+  const v = S(ctx).version ? S(ctx).version(ctx.ws.id) : null;
+  const hit = analyticsCache.get(ctx.ws.id);
+  if (v !== null && hit && hit.v === v) return structuredClone(hit.data);
+  const data = await computeAnalytics(ctx);
+  if (v !== null) { analyticsCache.set(ctx.ws.id, { v, data }); if (analyticsCache.size > 5000) analyticsCache.delete(analyticsCache.keys().next().value); }
+  return structuredClone(data);
+});
+
+async function computeAnalytics(ctx) {
   const [leads, msgs, meetings, deals, calls, channels] = await Promise.all(['leads', 'messages', 'meetings', 'deals', 'calls', 'channels'].map(c => list(ctx, c)));
+  const leadById = new Map(leads.map(l => [l.id, l]));
   const settings = await getSettings(ctx);
   const reached = (l, st) => l.stage !== 'lost' ? stageIndex(l.stage) >= stageIndex(st) : (l.history || []).some(h => stageIndex(h.stage) >= stageIndex(st) && h.stage !== 'lost');
   const funnel = ['new', 'researched', 'contacted', 'replied', 'meeting', 'won'].map(st => ({ stage: st, name: STAGES.find(s => s.id === st).name, n: leads.filter(l => reached(l, st)).length }));
@@ -625,7 +671,7 @@ R('GET', '/analytics', 'analytics', async (ctx) => {
   const byHook = Object.entries(groupBy(sent, m => m.hook || '—')).map(([hook, ms]) => {
     const ls = [...new Set(ms.map(m => m.leadId))];
     const rep = ls.filter(id => ms.find(m => m.leadId === id && m.repliedAt && !['negative', 'unsubscribe'].includes(m.replyKind))).length;
-    const mt = ls.filter(id => { const l = leads.find(x => x.id === id); return l && reached(l, 'meeting'); }).length;
+    const mt = ls.filter(id => { const l = leadById.get(id); return l && reached(l, 'meeting'); }).length;
     return { hook, name: HOOKS.find(h => h.id === hook)?.name || hook, sent: ls.length, replies: rep, replyRate: pct(rep, ls.length), meetings: mt, meetingRate: pct(mt, ls.length) };
   }).sort((a, b) => b.meetingRate - a.meetingRate || b.replyRate - a.replyRate);
   const contacted = funnel.find(f => f.stage === 'contacted').n;
@@ -642,14 +688,14 @@ R('GET', '/analytics', 'analytics', async (ctx) => {
     bySource: channelRoi(bySource), byHook, actual,
     conversion: { leadToMeeting: pct(funnel[4].n, funnel[0].n), meetingToDeal: pct(funnel[5].n, funnel[4].n), contactToReply: pct(funnel[3].n, contacted) },
   };
-});
+}
 
 R('POST', '/economics/funnel', null, async (ctx, { body }) => funnelModel(body));
 R('POST', '/economics/payback', null, async (ctx, { body }) => payback(body));
 R('POST', '/economics/saas', null, async (ctx, { body }) => saasModel(body));
 
 // ---------- channels (connectors) ----------
-R('GET', '/channels', null, async (ctx) => {
+R('GET', '/channels', 'settings', async (ctx) => {
   const saved = Object.fromEntries((await list(ctx, 'channels')).map(c => [c.type, c]));
   return CHANNELS.map(c => {
     const s = saved[c.type] || {};

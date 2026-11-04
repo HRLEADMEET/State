@@ -9,7 +9,7 @@ const SLANG = ['кейс', 'фишк', 'топ', 'чек', 'лид', 'оффер
 const BUSINESS = ['выручк', 'прибыл', 'маржин', 'оборот', 'команд', 'стратег', 'масштаб', 'клиент', 'продаж', 'рост', 'систем', 'процесс', 'результат', 'цифр', 'kpi', 'воронк', 'окупаем'];
 
 export function analyzeStyle(text = '') {
-  const raw = String(text || '').trim();
+  const raw = String(text || '').slice(0, 60_000).trim(); // для стиля хватает нескольких постов
   if (raw.length < 40) return { ok: false, reason: 'Мало текста: вставьте 3–5 постов или сообщений (от 300 знаков).', sample: raw.length };
   const sents = sentences(raw);
   const ws = words(raw);

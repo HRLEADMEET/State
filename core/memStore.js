@@ -1,5 +1,6 @@
 // Хранилище в памяти (тесты, демо в браузере). Тот же интерфейс, что у SQLite-хранилища сервера.
 import { uid, nowIso } from './util.js';
+import { leadSummary, statusKey } from './summary.js';
 
 export class MemStore {
   constructor(snapshot, onChange) {
@@ -8,7 +9,17 @@ export class MemStore {
     this.onChange = onChange || null;
   }
   _c(ws, coll) { return ((this.data[ws] ||= {})[coll] ||= {}); }
-  _changed() { if (this.onChange) this.onChange(this.snapshot()); }
+  _changed() { this._v = (this._v || 0) + 1; if (this.onChange) this.onChange(this.snapshot()); }
+  version() { return this._v || 0; }
+  project(ws, coll, fields) {
+    const get = (o, p) => p.split('.').reduce((x, k) => (x == null ? undefined : x[k]), o);
+    return Object.values(this._c(ws, coll)).map(d => Object.fromEntries(Object.entries(fields).map(([a, f]) => {
+      if (typeof f === 'string') { const v = get(d, f); return [a, v && typeof v === 'object' ? JSON.stringify(v) : v]; }
+      const arr = get(d, f.len); return [a, Array.isArray(arr) ? arr.length : null];
+    })));
+  }
+  summaries(ws, coll = 'leads') { return Object.values(this._c(ws, coll)).map(d => leadSummary(d)); }
+  countBy(ws, coll) { const out = {}; for (const d of Object.values(this._c(ws, coll))) { const k = statusKey(d) ?? 'null'; out[k] = (out[k] || 0) + 1; } return out; }
   snapshot() { return { data: this.data, workspaces: this.workspaces }; }
   list(ws, coll) { return Object.values(this._c(ws, coll)).map(d => structuredClone(d)); }
   get(ws, coll, id) { const d = this._c(ws, coll)[id]; return d ? structuredClone(d) : null; }

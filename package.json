@@ -1,0 +1,23 @@
+{
+  "name": "leadmeet-os",
+  "version": "0.8.0",
+  "private": true,
+  "description": "LEADMEET OS — платформа привлечения собственников бизнеса: HH-сигналы, персональные письма в стиле собственника, A/B офферов, скрипты встреч, разбор звонков, экономика и кабинеты клиентов.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings server/index.js",
+    "dev": "node --no-warnings --watch server/index.js",
+    "test": "node --no-warnings --test tests/",
+    "build:demo": "node scripts/build-demo.js",
+    "backup": "node --no-warnings scripts/backup-now.js",
+    "restore": "node --no-warnings scripts/restore.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

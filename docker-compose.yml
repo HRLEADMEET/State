@@ -1,0 +1,27 @@
+# docker compose up -d — приложение + Caddy (автоматический HTTPS от Let's Encrypt).
+# Перед запуском: DNS-запись домена на IP сервера, .env заполнен, домен прописан в deploy/Caddyfile.
+services:
+  app:
+    build: .
+    restart: always
+    env_file: .env
+    environment:
+      - TRUST_PROXY=true
+      - HOST=0.0.0.0
+    volumes:
+      - ./data:/app/data
+    expose:
+      - "8787"
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - app
+volumes:
+  caddy_data:
